@@ -27,7 +27,7 @@ const priorities = [
   ["trust", "Audience trust"], ["team", "Team leadership"], ["strategy", "Brand strategy"],
 ];
 
-function makeDoc(resumeText, role) {
+function makeDoc(resumeText, role, candidateContext = "") {
   const lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const name = lines[0] || "Your name";
   const title = lines[1] || role || "Professional title";
@@ -39,11 +39,16 @@ function makeDoc(resumeText, role) {
   const splitAt = Math.min(careerLines.length, Math.max(2, Math.ceil(careerLines.length / 2)));
   const currentText = careerLines.slice(0, splitAt).join("\n");
   const earlierText = careerLines.slice(splitAt).join("\n");
+  const suppliedAccomplishment = candidateContext.split(/(?<=[.!?])\s+/)[0]?.trim();
+  const firstName = name.split(/\s+/)[0];
+  const candidateLine = suppliedAccomplishment?.replace(new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+`, "i"), "") || "";
+  const firstCareerSentence = currentText.split(/(?<=[.!?])\s+/).find((line) => /\b(led|built|created|directed|developed|managed|launched|improved)\b/i.test(line)) || currentText;
+  const tailored = candidateLine || firstCareerSentence || "Add an accomplishment supported by your career history.";
   return {
     name, title, contact,
     summary: role ? `${title} with experience relevant to ${role}. Brings cross-functional leadership, audience understanding, and evidence-led storytelling.` : `${title} with cross-functional leadership and evidence-led storytelling experience.`,
     current: currentText || "Add your most recent role and accomplishments.",
-    tailored: "Working draft created from the evidence supplied so far. Complete the highest-value questions to strengthen this section.",
+    tailored: tailored.charAt(0).toUpperCase() + tailored.slice(1).replace(/[.\s]+$/, "") + ".",
     earlier: earlierText || "Add earlier roles that strengthen this case.",
     education: educationLine,
     skills: "Leadership · Strategy · Storytelling · Cross-functional collaboration",
@@ -103,7 +108,7 @@ export function analyzeSources(sources, meta) {
     origin: source.origin,
   }));
   return {
-    doc: makeDoc(resumeText, meta.role),
+    doc: makeDoc(resumeText, meta.role, sources.filter((source) => source.kind === "current").map((source) => source.text).join(" ")),
     questions,
     requirements,
     research,

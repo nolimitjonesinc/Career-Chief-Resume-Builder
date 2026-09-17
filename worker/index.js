@@ -1,8 +1,10 @@
 import { extractPublicUrl } from "../shared/url-extract.mjs";
+import { handleCareerAI } from "../shared/career-ai.mjs";
 
 export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname.startsWith("/api/ai/")) return handleCareerAI(request, env);
     if (requestUrl.pathname === "/api/extract-url") {
       if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
       try {

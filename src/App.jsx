@@ -12,23 +12,26 @@ import { exportResume } from "./lib/exporters";
 const blankMeta = { company: "", role: "" };
 const blankSource = { kind: "current", mode: "text", name: "", text: "", url: "", parsedFile: null };
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const storageKey = "career-chief-local-draft-v1";
+function readDraft() { try { return JSON.parse(localStorage.getItem(storageKey) || "null"); } catch { return null; } }
+const initialDraft = readDraft();
 
 export function App() {
-  const [screen, setScreen] = useState("intake");
-  const [tab, setTab] = useState("case");
-  const [meta, setMeta] = useState({ ...blankMeta });
-  const [resumeText, setResumeText] = useState("");
-  const [jobText, setJobText] = useState("");
-  const [jobUrl, setJobUrl] = useState("");
-  const [sources, setSources] = useState([]);
-  const [analysis, setAnalysis] = useState(null);
-  const [doc, setDoc] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [questions, setQuestions] = useState([]);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [questionStatus, setQuestionStatus] = useState({});
+  const [screen, setScreen] = useState(initialDraft?.screen || "intake");
+  const [tab, setTab] = useState(initialDraft?.tab || "case");
+  const [meta, setMeta] = useState(initialDraft?.meta || { ...blankMeta });
+  const [resumeText, setResumeText] = useState(initialDraft?.resumeText || "");
+  const [jobText, setJobText] = useState(initialDraft?.jobText || "");
+  const [jobUrl, setJobUrl] = useState(initialDraft?.jobUrl || "");
+  const [sources, setSources] = useState(initialDraft?.sources || []);
+  const [analysis, setAnalysis] = useState(initialDraft?.analysis || null);
+  const [doc, setDoc] = useState(initialDraft?.doc || null);
+  const [history, setHistory] = useState(initialDraft?.history || []);
+  const [questions, setQuestions] = useState(initialDraft?.questions || []);
+  const [questionIndex, setQuestionIndex] = useState(initialDraft?.questionIndex || 0);
+  const [questionStatus, setQuestionStatus] = useState(initialDraft?.questionStatus || {});
   const [answer, setAnswer] = useState("");
-  const [answers, setAnswers] = useState([]);
+  const [answers, setAnswers] = useState(initialDraft?.answers || []);
   const [proposal, setProposal] = useState("");
   const [help, setHelp] = useState(false);
   const [modal, setModal] = useState(null);
@@ -36,11 +39,22 @@ export function App() {
   const [selectedSource, setSelectedSource] = useState(null);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
-  const [manualEdit, setManualEdit] = useState(false);
-  const [projectName, setProjectName] = useState("primary");
-  const [savedProjects, setSavedProjects] = useState({});
+  const [manualEdit, setManualEdit] = useState(initialDraft?.manualEdit || false);
+  const [projectName, setProjectName] = useState(initialDraft?.projectName || "primary");
+  const [savedProjects, setSavedProjects] = useState(initialDraft?.savedProjects || {});
+  const [careerBank, setCareerBank] = useState(initialDraft?.careerBank || []);
+  const [newOpportunity, setNewOpportunity] = useState({ company: "", role: "", job: "" });
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiConsent, setAiConsent] = useState(initialDraft?.aiConsent || false);
+  const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const dialog = useRef(null);
   const priorFocus = useRef(null);
+
+  useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => setAiEnabled(Boolean(value.enabled))).catch(() => {}); }, []);
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, aiConsent })); }
+    catch { /* Browser storage may be unavailable or full; the current session still works. */ }
+  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, aiConsent]);
 
   const currentQuestion = questions[questionIndex];
   const completed = Object.values(questionStatus).filter((value) => value === "answered").length;
@@ -104,11 +118,17 @@ export function App() {
   }
 
   function addSource(source) {
-    setSources((current) => {
-      const next = [...current, source];
-      if (analysis) refreshAnalysis(next);
-      return next;
-    });
+    const next = [...sources, source];
+    setSources(next);
+    if (analysis) {
+      refreshAnalysis(next);
+      if (analysis.researchMode === "ai" && aiConsent) {
+        const combined = [...next];
+        if (resumeText.trim()) combined.unshift({ id: "pasted-resume", kind: "resume", name: "Pasted resume", text: resumeText.trim() });
+        if (jobText.trim()) combined.push({ id: "pasted-job", kind: "job", name: "Job description", text: jobText.trim() });
+        runAiPlan(combined, meta, true);
+      }
+    }
   }
 
   function refreshAnalysis(nextSources) {
@@ -135,6 +155,28 @@ export function App() {
     setQuestionIndex(0);
     setScreen("analysis");
     setNotice("");
+    if (aiEnabled && aiConsent) runAiPlan(intakeSources);
+  }
+
+  async function runAiPlan(nextSources, targetMeta = meta, preserveProgress = false) {
+    setBusy("Researching the company and rebuilding your hiring case…");
+    try {
+      const response = await fetch("/api/ai/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meta: targetMeta, sources: nextSources }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "AI research could not complete.");
+      setAnalysis((previous) => ({ ...previous, ...result, research: [...(previous?.research || []).filter((item) => !item.id?.startsWith("web-")), ...result.research], researchMode: "ai", doc: previous.doc }));
+      if (preserveProgress) {
+        const answered = questions.filter((item) => questionStatus[item.id] === "answered");
+        setQuestions([...answered, ...result.questions.filter((item) => !answered.some((old) => old.id === item.id))]);
+        setQuestionIndex(answered.length);
+      } else {
+        setQuestions(result.questions);
+        setQuestionIndex(0);
+        setQuestionStatus({});
+      }
+      setNotice("The researched hiring case is ready. Public findings have clickable source links.");
+    } catch (error) { setNotice(`${error.message} The working draft and source-based interview remain available.`); }
+    finally { setBusy(""); }
   }
 
   async function saveSourceDraft() {
@@ -174,9 +216,22 @@ export function App() {
     }
   }
 
-  function reviewAnswer() {
+  async function reviewAnswer() {
     if (!currentQuestion || !answer.trim()) return;
-    setProposal(proposeResumeUpdate(doc, currentQuestion, answer));
+    setPendingFollowUp(null);
+    let proposed = proposeResumeUpdate(doc, currentQuestion, answer);
+    if (analysis?.researchMode === "ai" && aiConsent) {
+      setBusy("Checking your answer against the hiring case…");
+      try {
+        const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer, priorAnswers: answers }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "That answer could not be analyzed.");
+        proposed = result.proposal;
+        setPendingFollowUp(result.followUp);
+      } catch (error) { setNotice(`${error.message} Review the editable draft wording below.`); }
+      finally { setBusy(""); }
+    }
+    setProposal(proposed);
     setModal("proposal");
   }
 
@@ -184,13 +239,15 @@ export function App() {
     const question = currentQuestion;
     const savedAnswer = answer.trim();
     setHistory((items) => [...items, { ...doc }]);
-    setDoc((value) => ({ ...value, tailored: proposal.trim() }));
+    setDoc((value) => ({ ...value, tailored: answers.length ? `${value.tailored}\n${proposal.trim()}` : proposal.trim() }));
     setAnswers((items) => [...items, { id: uid(), questionId: question.id, topic: question.topic, question: question.prompt, text: savedAnswer, resumeLine: proposal.trim() }]);
+    setCareerBank((items) => [...items, { id: uid(), topic: question.topic, question: question.prompt, text: savedAnswer, origin: `${meta.company || "Opportunity"} interview` }]);
     setQuestionStatus((state) => ({ ...state, [question.id]: "answered" }));
-    if (question.id === "ownership" && !questions.some((item) => item.id === "ownership-detail")) {
-      const followUp = { id: "ownership-detail", priority: "From your answer", topic: "Personal contribution", prompt: "Who else was involved, and which decisions or deliverables were specifically yours?", why: "Your answer shows a program. This follow-up separates collaboration from personal ownership.", tip: "Credit the team while being precise about what you drove." };
+    if (pendingFollowUp || (question.id === "ownership" && !questions.some((item) => item.id === "ownership-detail"))) {
+      const followUp = pendingFollowUp || { id: "ownership-detail", priority: "From your answer", topic: "Personal contribution", prompt: "Who else was involved, and which decisions or deliverables were specifically yours?", why: "Your answer shows a program. This follow-up separates collaboration from personal ownership.", tip: "Credit the team while being precise about what you drove." };
       setQuestions((items) => [...items.slice(0, questionIndex + 1), followUp, ...items.slice(questionIndex + 1)]);
     }
+    setPendingFollowUp(null);
     setAnswer("");
     setHelp(false);
     setModal(null);
@@ -233,31 +290,47 @@ export function App() {
     }
   }
 
-  function switchSampleProject() {
-    const currentKey = projectName;
-    const nextKey = projectName === "primary" ? "harbor" : "primary";
-    setSavedProjects((saved) => ({ ...saved, [currentKey]: { meta, doc, analysis, questions, answers, questionStatus, questionIndex, sources } }));
-    const saved = savedProjects[nextKey];
-    if (saved) {
-      setMeta(saved.meta); setDoc(saved.doc); setAnalysis(saved.analysis); setQuestions(saved.questions); setAnswers(saved.answers); setQuestionStatus(saved.questionStatus); setQuestionIndex(saved.questionIndex); setSources(saved.sources);
-    } else {
-      const harborMeta = { company: "Harbor Studio", role: "Head of Brand" };
-      const shared = sources.filter((source) => ["resume", "current", "goals"].includes(source.kind));
-      const harborJob = { id: "harbor-job", kind: "job", name: "Head of Brand brief", origin: "Fictional second opportunity", text: "Lead brand strategy, creative direction, and an in-house team. Build a consistent brand across consumer launches and executive communications.", status: "ready" };
-      const nextSources = [...shared, harborJob];
-      const next = analyzeSources(nextSources, harborMeta);
-      setMeta(harborMeta); setSources(nextSources); setAnalysis(next); setDoc(next.doc); setQuestions(next.questions); setAnswers([]); setQuestionStatus({}); setQuestionIndex(0);
-    }
-    setProjectName(nextKey);
-    setHistory([]);
-    setTab("case");
-    setModal(null);
-    setNotice("A separate opportunity opened. Career evidence is shared; the hiring case, questions, and resume stay separate.");
+  function snapshot() { return { meta, doc, analysis, questions, answers, questionStatus, questionIndex, sources, resumeText, jobText, manualEdit }; }
+
+  function openSavedProject(key) {
+    const target = savedProjects[key];
+    if (!target) return;
+    setSavedProjects((saved) => ({ ...saved, [projectName]: snapshot() }));
+    setProjectName(key);
+    setMeta(target.meta); setDoc(target.doc); setAnalysis(target.analysis); setQuestions(target.questions);
+    setAnswers(target.answers); setQuestionStatus(target.questionStatus); setQuestionIndex(target.questionIndex);
+    setSources(target.sources); setResumeText(target.resumeText || ""); setJobText(target.jobText || ""); setManualEdit(target.manualEdit || false);
+    setHistory([]); setTab("case"); setModal(null);
+    setNotice("Opportunity opened. Its questions and resume are separate; confirmed career answers remain in your evidence bank.");
+  }
+
+  function createOpportunity() {
+    if (!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20) return;
+    const key = uid();
+    const nextMeta = { company: newOpportunity.company.trim(), role: newOpportunity.role.trim() };
+    const shared = sources.filter((source) => source.id !== "career-bank" && ["resume", "current", "goals", "other"].includes(source.kind));
+    const supplied = resumeText.trim() ? [{ id: "pasted-resume", kind: "resume", name: "Pasted resume", origin: "Pasted text", text: resumeText.trim(), status: "ready" }] : [];
+    const interviewSource = careerBank.length ? [{ id: "career-bank", kind: "current", name: "Confirmed interview answers", origin: "User-supplied career evidence", text: careerBank.map((item) => `${item.topic}: ${item.text}`).join("\n"), status: "ready" }] : [];
+    const roleSource = { id: uid(), kind: "job", name: `${nextMeta.role} brief`, origin: "Pasted job description", text: newOpportunity.job.trim(), status: "ready" };
+    const nextSources = [...shared, ...supplied.filter((item) => !shared.some((source) => source.kind === "resume")), ...interviewSource, roleSource];
+    const next = analyzeSources(nextSources, nextMeta);
+    setSavedProjects((saved) => ({ ...saved, [projectName]: snapshot() }));
+    setProjectName(key); setMeta(nextMeta); setSources(nextSources); setResumeText(""); setJobText("");
+    setAnalysis(next); setDoc(next.doc); setQuestions(next.questions); setAnswers([]); setQuestionStatus({}); setQuestionIndex(0);
+    setHistory([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
+    setNewOpportunity({ company: "", role: "", job: "" });
+    setNotice("New opportunity created from your career evidence. Its hiring case and resume are ready to refine.");
+    if (aiEnabled && aiConsent) runAiPlan(nextSources, nextMeta);
+  }
+
+  function clearLocalDraft() {
+    localStorage.removeItem(storageKey);
+    window.location.reload();
   }
 
   return <>
     <Header hasDraft={Boolean(doc)} finish={() => setModal("finish")} home={() => setModal("home")} />
-    <div className="demo-strip"><strong>WORKING PROTOTYPE</strong><span>Files are extracted in this session. Public links are read through a limited page reader. Interpretation uses a transparent prototype analyzer—not live AI.</span></div>
+    <div className="demo-strip"><strong>WORKING PROTOTYPE</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Source analysis is rule-based. AI research is available when connected and selected."} Your draft is stored in this browser on this device.</span></div>
     {busy && <div className="busy" role="status"><Sparkle size={17} weight="fill" /> {busy}</div>}
     {notice && <div className="notice" role="status"><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice("")}><X size={17} /></button></div>}
 
@@ -267,7 +340,7 @@ export function App() {
       sources={readySources} loadSample={loadSample} addFile={addFile} readJobLink={readJobLink}
       removeSource={(id) => setSources((items) => items.filter((item) => item.id !== id))}
       openSource={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}
-      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)}
+      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={clearLocalDraft}
     />}
 
     {screen === "analysis" && analysis && <AnalysisReady analysis={analysis} sources={intakeSources} open={() => { setScreen("workspace"); setTab("case"); }} />}
@@ -285,7 +358,7 @@ export function App() {
           {tab === "case" && <HiringCase analysis={analysis} questions={questions} sources={intakeSources} start={() => setTab("interview")} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
           {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} answer={answer} setAnswer={setAnswer} review={reviewAnswer} skip={skipQuestion} help={help} setHelp={setHelp} sample={() => setAnswer(currentQuestion?.sample || "")} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} />}
-          {tab === "career" && <CareerEvidence sources={intakeSources} answers={answers} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
+          {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
         <aside className="resume-pane">
           <div className="resume-top"><div><span>Working resume</span><small>Available from the start</small></div><button className="text-action" onClick={() => setModal("editor")}><ArrowSquareOut size={17} /> Open & edit</button></div>
@@ -301,9 +374,11 @@ export function App() {
       {modal === "source-view" && selectedSource && <SourceView source={selectedSource} />}
       {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} />}
       {modal === "editor" && <ResumeEditor doc={doc} save={saveEditor} />}
-      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} download={downloadResume} edit={() => setModal("editor")} />}
-      {modal === "opportunity" && <Opportunity meta={meta} projectName={projectName} switchProject={switchSampleProject} />}
+      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} />}
+      {modal === "opportunity" && <Opportunity meta={meta} projects={savedProjects} openProject={openSavedProject} create={() => setModal("new-opportunity")} />}
+      {modal === "new-opportunity" && <><h2>Another company, same career.</h2><p>Add the role and job description. Your confirmed career answers will come along; the resume and questions will be tailored separately.</p><label>Company<input value={newOpportunity.company} onChange={(e) => setNewOpportunity({ ...newOpportunity, company: e.target.value })} placeholder="Company name" /></label><label>Target role<input value={newOpportunity.role} onChange={(e) => setNewOpportunity({ ...newOpportunity, role: e.target.value })} placeholder="Role title" /></label><label>Job description<textarea value={newOpportunity.job} onChange={(e) => setNewOpportunity({ ...newOpportunity, job: e.target.value })} placeholder="Paste the role or application questions. Add other files and links afterward." /></label><button className="primary" disabled={!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20} onClick={createOpportunity}>Build this opportunity <ArrowRight size={18} /></button></>}
       {modal === "home" && <><h2>Return to your source stack?</h2><p>Your current session stays here unless the page is refreshed.</p><button className="primary" onClick={() => { setScreen("intake"); setModal(null); }}>Return to sources</button></>}
+      {modal === "clear" && <><h2>Clear this device’s draft?</h2><p>This deletes the saved career material, sources, answers, and resume from this browser. Download anything you need first.</p><button className="secondary" onClick={() => setModal(null)}>Keep my draft</button><button className="primary" onClick={clearLocalDraft}>Clear draft</button></>}
     </dialog>
   </>;
 }
@@ -312,7 +387,7 @@ function Header({ hasDraft, finish, home }) {
   return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Thoughtful careers. Brighter tomorrows.</span>{hasDraft && <button className="primary" onClick={finish}>Finish my resume now</button>}</div></header>;
 }
 
-function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy }) {
+function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {
   return <main className="intake-page">
     <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1>Give me the messy pile.<br/>I’ll find the story.</h1><p>Bring the resume, the role, and anything else that could change the hiring case. You do not have to organize it first.</p><button className="text-action sample-link" onClick={loadSample}>Load Jordan’s complete fictional case <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>Useful context can come from anywhere.</strong><br/>PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
@@ -329,8 +404,10 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}
       <button type="button" className="add-source" onClick={openSource}><Plus size={19} /> Add current responsibilities, company research, CEO context, goals, or another document</button>
+      {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to OpenAI for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
       <button className="primary wide" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
       {!canBegin && <p className="form-hint">Add a resume, target role, and job description or job file to begin.</p>}
+      <p className="form-hint">This browser saves your draft on this device. <button type="button" className="text-action" onClick={clear}>Clear saved draft</button></p>
     </form>
   </main>;
 }
@@ -351,7 +428,7 @@ function AnalysisReady({ analysis, sources, open }) {
     ["Created the interview plan", `${analysis.questions.length} questions, ordered by value`],
     ["Generated an early resume", "Editable now · no need to finish the interview"],
   ];
-  return <main className="analysis-page"><span className="eyebrow">The homework comes first</span><h1>Your starting point is ready.</h1><p>I read the documents together, built a first hiring case, and identified the questions most likely to improve it.</p><div className="analysis-grid">{steps.map(([title, detail], index) => <div className="analysis-step" key={title}><span>{index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div><CheckCircle size={22} weight="fill" /></div>)}</div><div className="analysis-summary"><Target size={29} /><div><small>Working thesis</small><strong>{analysis.thesis}</strong></div></div><button className="primary" onClick={open}>Open my hiring case <ArrowRight size={19} /></button><p className="quiet">This prototype uses deterministic text analysis. Production would add live AI reasoning and deeper source verification.</p></main>;
+  return <main className="analysis-page"><span className="eyebrow">The homework comes first</span><h1>Your starting point is ready.</h1><p>I read the documents together, built a first hiring case, and identified the questions most likely to improve it.</p><div className="analysis-grid">{steps.map(([title, detail], index) => <div className="analysis-step" key={title}><span>{index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div><CheckCircle size={22} weight="fill" /></div>)}</div><div className="analysis-summary"><Target size={29} /><div><small>Working thesis</small><strong>{analysis.thesis}</strong></div></div><button className="primary" onClick={open}>Open my hiring case <ArrowRight size={19} /></button><p className="quiet">{analysis.researchMode === "ai" ? "AI research is active. Review public source links and confirm personal career claims before use." : "This starting point uses the supplied material. AI web research is available when connected and selected."}</p></main>;
 }
 
 function HiringCase({ analysis, questions, sources, start, research }) {
@@ -359,7 +436,7 @@ function HiringCase({ analysis, questions, sources, start, research }) {
 }
 
 function Research({ analysis, sources, inspect, add }) {
-  return <><span className="eyebrow">Research with receipts</span><h1>What the sources say.<br/>What it changes.</h1><p className="lead">Resume evidence, role requirements, company direction, leadership context, and uncertainty stay visibly separate.</p><div className="research-stats"><div><strong>{sources.length}</strong><span>sources</span></div><div><strong>{analysis.requirements.length}</strong><span>role priorities</span></div><div><strong>{analysis.gaps.length}</strong><span>open questions</span></div></div><section className="source-library"><div className="section-title"><div><h3>Source library</h3><p>Open any item to see the extracted text.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add source</button></div>{sources.map((source) => <button className="source-button" key={source.id} onClick={() => inspect(source)}><span className="source-type">{sourceLabels[source.kind]}</span><strong>{source.name}</strong><small>{source.origin}</small><ArrowSquareOut size={16} /></button>)}</section><div className="research-list">{analysis.research.map((item) => <article key={item.id}><span className="eyebrow">{item.label} · {item.origin}</span><h3>{item.title}</h3><p>{item.finding}</p><div className="implication"><strong>What this changes</strong><p>{item.implication}</p></div><button className="text-action" onClick={() => inspect(sources.find((source) => source.id === item.id))}>View extracted evidence <ArrowSquareOut size={16} /></button></article>)}</div></>;
+  return <><span className="eyebrow">Research with receipts</span><h1>What the sources say.<br/>What it changes.</h1><p className="lead">Resume evidence, role requirements, company direction, leadership context, and uncertainty stay visibly separate.</p><div className="research-stats"><div><strong>{sources.length}</strong><span>supplied sources</span></div><div><strong>{analysis.requirements.length}</strong><span>role priorities</span></div><div><strong>{analysis.gaps.length}</strong><span>open questions</span></div></div><section className="source-library"><div className="section-title"><div><h3>Source library</h3><p>Open any item to see the extracted text.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add source</button></div>{sources.map((source) => <button className="source-button" key={source.id} onClick={() => inspect(source)}><span className="source-type">{sourceLabels[source.kind]}</span><strong>{source.name}</strong><small>{source.origin}</small><ArrowSquareOut size={16} /></button>)}</section><div className="research-list">{analysis.research.map((item) => <article key={item.id}><span className="eyebrow">{item.label} · {item.origin}</span><h3>{item.title}</h3><p>{item.finding}</p><div className="implication"><strong>What this changes</strong><p>{item.implication}</p></div>{item.url ? <a className="text-action" href={item.url} target="_blank" rel="noreferrer">Read public source <ArrowSquareOut size={16} /></a> : <button className="text-action" onClick={() => inspect(sources.find((source) => source.id === item.id))}>View extracted evidence <ArrowSquareOut size={16} /></button>}</article>)}</div></>;
 }
 
 function Interview({ questions, index, status, answer, setAnswer, review, skip, help, setHelp, sample, add, finish }) {
@@ -369,9 +446,9 @@ function Interview({ questions, index, status, answer, setAnswer, review, skip, 
   return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><div className="progress-track"><span style={{ width: `${Math.max(5, (answered / questions.length) * 100)}%` }} /></div><div className="interview-layout"><aside className="question-plan"><span className="eyebrow">YOUR QUESTION PLAN</span>{questions.map((item, itemIndex) => <button key={item.id} className={itemIndex === index ? "current" : ""} disabled={itemIndex > index || status[item.id] === "answered"}><span>{status[item.id] === "answered" ? <Check size={13} /> : itemIndex + 1}</span><div><strong>{item.topic}</strong><small>{status[item.id] || item.priority}</small></div></button>)}</aside><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><h2>{q.prompt}</h2><details><summary>Why this can change your case</summary><p>{q.why}</p></details><label>Your answer<textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Tell me what you remember. Rough notes are perfect." /></label>{q.sample && <button className="text-action sample-answer" onClick={sample}>Use a fictional sample answer</button>}<div className="question-actions"><button className="text-action" onClick={() => setHelp(!help)}>I don’t know yet</button><button className="text-action" onClick={skip}>Skip for now</button><button className="primary" disabled={!answer.trim()} onClick={review}>Review resume update <ArrowRight size={18} /></button></div>{help && <div className="help-panel"><h3>Let’s make it easier.</h3><p>{q.tip}</p><div className="search-task"><MagnifyingGlass size={20} /><div><strong>Evidence search worth your time</strong><p>Search permitted email, documents, or notes for the project name plus “launch,” “results,” “approved,” or “team.” Add an excerpt only if you are allowed to share it.</p></div></div><button className="text-action" onClick={add}><Plus size={16} /> Add what I find</button></div>}</section></div></>;
 }
 
-function CareerEvidence({ sources, answers, inspect, add }) {
+function CareerEvidence({ sources, answers, inspect, add, clear }) {
   const career = sources.filter((source) => ["resume", "current", "goals", "other"].includes(source.kind));
-  return <><span className="eyebrow">Your reusable career record</span><h1>Remember it once.<br/>Use it thoughtfully.</h1><p className="lead">Career evidence can support more than one application. Each company still gets its own strategy and resume draft.</p><div className="section-title"><div><h3>Career sources</h3><p>Documents and context you supplied.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add context</button></div>{career.map((source) => <button className="evidence-card" key={source.id} onClick={() => inspect(source)}><span className="badge">{sourceLabels[source.kind]} · supplied</span><strong>{source.name}</strong><p>{source.text.slice(0, 180)}{source.text.length > 180 ? "…" : ""}</p></button>)}<div className="section-title answer-title"><div><h3>Evidence gathered in the interview</h3><p>These answers are user-supplied, not independently verified.</p></div><span className="count-pill">{answers.length}</span></div>{answers.length ? answers.map((item) => <article className="answer-evidence" key={item.id}><span className="badge">{item.topic}</span><p>{item.text}</p><small>Resume wording: {item.resumeLine}</small></article>) : <div className="empty-card">Useful answers will collect here as you work through the question plan.</div>}</>;
+  return <><span className="eyebrow">Your reusable career record</span><h1>Remember it once.<br/>Use it thoughtfully.</h1><p className="lead">Career evidence can support more than one application. Each company still gets its own strategy and resume draft.</p><div className="section-title"><div><h3>Career sources</h3><p>Documents and context you supplied.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add context</button></div>{career.map((source) => <button className="evidence-card" key={source.id} onClick={() => inspect(source)}><span className="badge">{sourceLabels[source.kind]} · supplied</span><strong>{source.name}</strong><p>{source.text.slice(0, 180)}{source.text.length > 180 ? "…" : ""}</p></button>)}<div className="section-title answer-title"><div><h3>Evidence gathered in the interview</h3><p>These answers are user-supplied, not independently verified.</p></div><span className="count-pill">{answers.length}</span></div>{answers.length ? answers.map((item) => <article className="answer-evidence" key={item.id}><span className="badge">{item.topic}</span><p>{item.text}</p><small>Resume wording: {item.resumeLine}</small></article>) : <div className="empty-card">Useful answers will collect here as you work through the question plan.</div>}<button className="text-action" onClick={clear}>Clear saved draft from this device</button></>;
 }
 
 function Resume({ doc, answered }) {
@@ -388,6 +465,6 @@ function Proposal({ doc, question, answer, proposal, setProposal, apply, manual 
 
 function ResumeEditor({ doc, save }) { const [value, setValue] = useState({ ...doc }); const fields = { name: "Name", title: "Professional title", contact: "Contact details", summary: "Professional summary", current: "Current experience", tailored: "Tailored achievement", earlier: "Earlier experience", education: "Education", skills: "Capabilities" }; return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>{Object.entries(fields).map(([key,label]) => <label key={key}>{label}{["summary","current","tailored","earlier","skills"].includes(key) ? <textarea value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} /> : <input value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} />}</label>)}<button className="primary" onClick={() => save(value)}>Save my wording <Check size={18} /></button></>; }
 
-function Finish({ completed, total, analysis, download, edit }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div><div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Likely concern:</strong> {analysis.caution}</p><p><strong>Interview structure:</strong> describe the problem, your specific role, the operating choices, and only the results you can support.</p></details><p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
+function Finish({ completed, total, analysis, answers, download, edit }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div><div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
 
-function Opportunity({ meta, projectName, switchProject }) { return <><span className="eyebrow">SEPARATE APPLICATION WORKSPACE</span><h2>One career. A different case for every company.</h2><p>Career evidence can be reused. Company research, the interview plan, and resume wording stay attached to their opportunity.</p><div className="opportunity-card current"><span>Current</span><strong>{meta.company}</strong><p>{meta.role}</p></div><button className="opportunity-card switch" onClick={switchProject}><span>Open sample</span><strong>{projectName === "primary" ? "Harbor Studio" : "Nestwell"}</strong><p>{projectName === "primary" ? "Head of Brand" : "Senior Director, Content & Community"}</p><ArrowRight size={19} /></button><p className="quiet">The second sample keeps its own document, questions, and progress for this session.</p></>; }
+function Opportunity({ meta, projects, openProject, create }) { return <><span className="eyebrow">SEPARATE APPLICATION WORKSPACE</span><h2>One career. A different case for every company.</h2><p>Career evidence can be reused. Company research, the interview plan, and resume wording stay attached to their opportunity.</p><div className="opportunity-card current"><span>Current</span><strong>{meta.company || "Current opportunity"}</strong><p>{meta.role}</p></div>{Object.entries(projects).map(([id, project]) => <button className="opportunity-card switch" key={id} onClick={() => openProject(id)}><span>Open saved opportunity</span><strong>{project.meta.company || "Target company"}</strong><p>{project.meta.role}</p><ArrowRight size={19} /></button>)}<button className="primary" onClick={create}><Plus size={18} /> Add another company</button></>; }
