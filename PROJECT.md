@@ -139,6 +139,7 @@ These are documented limits, not bugs to rediscover.
 - **Exports don't preserve the original layout.** They generate fresh documents from the approved draft.
 - **Accessibility unverified.** Labels, focus styles, and semantics are in place, but keyboard order, screen-reader output, zoom reflow, and WCAG conformance were never confirmed by testing.
 - **Only two opportunity workspaces**, and they're hardcoded sample projects.
+- **The public-page reader is not safe to expose publicly yet (SSRF).** It blocks unsafe addresses by *name* — it rejects `localhost`, `.local`, bare hostnames and raw IPs as text patterns. It never checks where a hostname actually points, so an ordinary-looking address that resolves to a private or internal machine (or a cloud metadata endpoint) passes the check, and the app fetches it on the user's behalf. Redirects are followed and only re-checked with the same weak name test, after the request has already gone out. Harmless while this runs locally for one person; must be fixed before any public deployment, and the fix differs between the Node dev server and the Cloudflare Worker, so it needs real thought rather than a copied snippet. Flagged by automated review on Sep 17, 2026.
 - **Not under version control.** No git repo, so no history and no Status Brain snapshot.
 
 ## 9. Deeper history

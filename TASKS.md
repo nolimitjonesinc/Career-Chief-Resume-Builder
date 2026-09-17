@@ -9,6 +9,7 @@ Everything below comes from the documented gaps in `PROJECT.md` section 8 and th
 production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 
 ## Next up
+- [ ] **Before any public deploy:** close the SSRF hole in the public-page reader — verify where a hostname actually resolves rather than pattern-matching its name, re-validate every redirect hop, and gate outbound requests on the Worker side (see PROJECT.md known gaps)
 - [ ] Connect a real model so the analysis and the interview stop being keyword rules
 - [ ] Automated research: company, leadership, role and the candidate's public work — with source URLs, excerpts, retrieval dates and confidence
 - [ ] Make the session survive a refresh (durable storage for sources, answers, resume draft and question progress)
