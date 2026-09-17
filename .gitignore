@@ -13,4 +13,5 @@ dist/
 # editor / OS noise
 .DS_Store
 *.log
-.openai/
+.openai/*
+!.openai/hosting.json
