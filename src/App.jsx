@@ -223,7 +223,7 @@ export function App() {
     if (analysis?.researchMode === "ai" && aiConsent) {
       setBusy("Checking your answer against the hiring case…");
       try {
-        const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer, priorAnswers: answers }) });
+        const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer, priorAnswers: answers, askedTopics: questions.slice(0, questionIndex + 1).map((item) => item.topic), pendingTopics: questions.slice(questionIndex + 1).map((item) => item.topic) }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "That answer could not be analyzed.");
         proposed = result.proposal;
