@@ -15,3 +15,4 @@ dist/
 *.log
 .openai/*
 !.openai/hosting.json
+.vercel
