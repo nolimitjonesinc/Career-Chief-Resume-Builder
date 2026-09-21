@@ -4,10 +4,16 @@ const MAX_INPUT = 48_000;
 // One model per job, cheapest that does the job well. Override any of these with
 // an environment variable to retune cost without touching code.
 // RESEARCH also pays $10/1k for the web_search tool itself, which dominates its cost.
+// `process` does not exist on every runtime this module targets, so read it
+// defensively rather than assuming Node.
+const envValue = (name) => {
+  try { return typeof process !== "undefined" ? process.env?.[name] : undefined; }
+  catch { return undefined; }
+};
 const MODELS = {
-  research: process.env?.CAREER_AI_RESEARCH_MODEL || "gpt-5.6-terra",
-  reasoning: process.env?.CAREER_AI_REASONING_MODEL || "gpt-5.5",
-  drafting: process.env?.CAREER_AI_DRAFTING_MODEL || "gpt-5-mini",
+  research: envValue("CAREER_AI_RESEARCH_MODEL") || "gpt-5.6-terra",
+  reasoning: envValue("CAREER_AI_REASONING_MODEL") || "gpt-5.5",
+  drafting: envValue("CAREER_AI_DRAFTING_MODEL") || "gpt-5-mini",
 };
 // web_search support on the cheaper models is not documented; if the research
 // model rejects the tool we retry once on the model known to support it.
