@@ -1,6 +1,18 @@
 const API = "https://api.openai.com/v1/responses";
 const MAX_INPUT = 48_000;
 
+// One model per job, cheapest that does the job well. Override any of these with
+// an environment variable to retune cost without touching code.
+// RESEARCH also pays $10/1k for the web_search tool itself, which dominates its cost.
+const MODELS = {
+  research: process.env?.CAREER_AI_RESEARCH_MODEL || "gpt-5.6-terra",
+  reasoning: process.env?.CAREER_AI_REASONING_MODEL || "gpt-5.5",
+  drafting: process.env?.CAREER_AI_DRAFTING_MODEL || "gpt-5-mini",
+};
+// web_search support on the cheaper models is not documented; if the research
+// model rejects the tool we retry once on the model known to support it.
+const RESEARCH_FALLBACK = "gpt-5.5";
+
 function validPayload(body) {
   const size = JSON.stringify(body).length;
   if (size > MAX_INPUT) throw new Error("This case has too much text for one analysis. Remove less relevant sources and try again.");
@@ -77,16 +89,25 @@ async function createPlan(payload, key, fetchImpl) {
   let publicResearch = "No public research requested.";
   let citations = [];
   if (payload.meta?.company?.trim()) {
-    const result = await askOpenAI({
-      model: "gpt-5.5", store: false, tools: [{ type: "web_search" }],
+    const researchRequest = {
+      store: false, tools: [{ type: "web_search" }],
       instructions: "Research the stated company and role using public sources. Focus on actual job requirements and application questions, official company direction, CEO/marketing leader statements and business trajectory. Date each claim. Cite sources inline with URLs. If evidence is missing, say so. Never infer that the candidate personally worked on a public project. Keep it under 900 words.",
       input: `Research ${payload.meta.company} for the role ${payload.meta.role}. Job excerpt: ${payload.sources.filter((s) => ["job", "application"].includes(s.kind)).map((s) => s.text.slice(0, 2_000)).join("\n")}`,
-    }, key, fetchImpl);
+    };
+    let result;
+    try {
+      result = await askOpenAI({ model: MODELS.research, ...researchRequest }, key, fetchImpl);
+    } catch (error) {
+      // The cheaper research model may not accept the web_search tool. Retry once
+      // on the model known to support it rather than losing the research step.
+      if (MODELS.research === RESEARCH_FALLBACK) throw error;
+      result = await askOpenAI({ model: RESEARCH_FALLBACK, ...researchRequest }, key, fetchImpl);
+    }
     publicResearch = result.text;
     citations = result.citations;
   }
   const { data } = await askOpenAI({
-    model: "gpt-5.5", store: false,
+    model: MODELS.reasoning, store: false,
     instructions,
     input: `Build the hiring case from the candidate sources and the cited public research. Output JSON with keys thesis (string), strongestFit (string), caution (string), known (array of short strings supported by supplied candidate sources), gaps (array of unproven requirements, not automatically real gaps), questions (array of objects with topic,prompt,why,tip), research (array of objects with title,finding,implication,url; use only an exact URL in citedUrls), applicationDrafts (array of objects question,draft,needsConfirmation for explicit application questions ONLY; use an empty array when none were supplied). Do not write unsupported answers. Never treat a public project as proof of candidate ownership. No markdown.\n${JSON.stringify({ citedUrls: citations.map((item) => item.url), publicResearch, candidateAndRole: input })}`,
     text: { format: { type: "json_object" } },
@@ -105,7 +126,7 @@ async function createPlan(payload, key, fetchImpl) {
 async function followUp(payload, key, fetchImpl) {
   if (!payload?.answer?.trim() || !payload?.question?.prompt || JSON.stringify(payload).length > MAX_INPUT) throw new Error("A question and answer are needed.");
   const { data } = await askOpenAI({
-    model: "gpt-5.5", store: false,
+    model: MODELS.drafting, store: false,
     instructions: `${instructions} The candidate's answer is user-supplied, not independently verified. Preserve their personal contribution accurately. If a critical ambiguity remains, ask one narrow follow-up. Never add a number absent from their answer. Output JSON only.`,
     input: `Given this candidate answer, output JSON keys proposal (one resume achievement sentence supported by the answer, no placeholders), followUp (object with topic,prompt,why,tip, or null if not worth the effort). Do not repeat a previously answered question.\n${JSON.stringify({ role: payload.role, question: payload.question, answer: payload.answer, priorAnswers: payload.priorAnswers?.slice(-4) })}`,
     text: { format: { type: "json_object" } },
