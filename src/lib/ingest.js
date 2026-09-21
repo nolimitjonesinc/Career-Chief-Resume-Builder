@@ -42,4 +42,13 @@ export async function extractUrl(url) {
   return body;
 }
 
-export const acceptedFiles = ".pdf,.docx,.html,.htm,.txt,.md,.rtf";
+// Extensions alone leave valid files greyed out in some file pickers, so the
+// matching media types are listed too.
+export const acceptedFiles = [
+  ".pdf", "application/pdf",
+  ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".html", ".htm", "text/html",
+  ".txt", "text/plain",
+  ".md", "text/markdown",
+  ".rtf", "application/rtf", "text/rtf",
+].join(",");
