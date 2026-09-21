@@ -239,9 +239,19 @@ export function App() {
     const question = currentQuestion;
     const savedAnswer = answer.trim();
     setHistory((items) => [...items, { ...doc }]);
-    setDoc((value) => ({ ...value, tailored: answers.length ? `${value.tailored}\n${proposal.trim()}` : proposal.trim() }));
-    setAnswers((items) => [...items, { id: uid(), questionId: question.id, topic: question.topic, question: question.prompt, text: savedAnswer, resumeLine: proposal.trim() }]);
-    setCareerBank((items) => [...items, { id: uid(), topic: question.topic, question: question.prompt, text: savedAnswer, origin: `${meta.company || "Opportunity"} interview` }]);
+    const line = proposal.trim();
+    // A follow-up sharpens an answer already given, so its wording replaces the
+    // earlier line for that topic instead of stacking a near duplicate beneath
+    // it. Replacing the exact text leaves any hand-edited lines untouched.
+    const earlier = answers.find((item) => item.topic === question.topic);
+    setDoc((value) => ({
+      ...value,
+      tailored: earlier && value.tailored.includes(earlier.resumeLine)
+        ? value.tailored.replace(earlier.resumeLine, line)
+        : (value.tailored && answers.length ? `${value.tailored}\n${line}` : line),
+    }));
+    setAnswers((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), questionId: question.id, topic: question.topic, question: question.prompt, text: savedAnswer, resumeLine: line }]);
+    setCareerBank((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), topic: question.topic, question: question.prompt, text: savedAnswer, origin: `${meta.company || "Opportunity"} interview` }]);
     setQuestionStatus((state) => ({ ...state, [question.id]: "answered" }));
     if (pendingFollowUp || (question.id === "ownership" && !questions.some((item) => item.id === "ownership-detail"))) {
       const followUp = pendingFollowUp || { id: "ownership-detail", priority: "From your answer", topic: "Personal contribution", prompt: "Who else was involved, and which decisions or deliverables were specifically yours?", why: "Your answer shows a program. This follow-up separates collaboration from personal ownership.", tip: "Credit the team while being precise about what you drove." };
