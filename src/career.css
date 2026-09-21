@@ -33,3 +33,7 @@ dialog{border:0;border-radius:12px;padding:0 28px 28px;width:min(610px,92vw);max
 /* The thinking message next to the answer button, where the eye already is. */
 .thinking-inline{display:flex;align-items:center;gap:10px;margin-top:16px;padding:13px 16px;background:#eef6f1;border:1px solid #cfe3d8;border-radius:11px;color:#23543e;font-size:14.5px}
 .thinking-inline strong{font-weight:600}
+
+/* The focus ring sits 6px outside the field. Without a gap it paints straight
+   over the label above, so give every field inside a label room to glow. */
+label>input,label>textarea,label>select{margin-top:8px}
