@@ -37,3 +37,10 @@ dialog{border:0;border-radius:12px;padding:0 28px 28px;width:min(610px,92vw);max
 /* The focus ring sits 6px outside the field. Without a gap it paints straight
    over the label above, so give every field inside a label room to glow. */
 label>input,label>textarea,label>select{margin-top:8px}
+
+/* Question topics come from the model and can be long, with slash-joined runs
+   that offer no natural place to break. Let the column shrink, allow a break
+   anywhere, and cap the tallest ones so one topic cannot swamp the rail. */
+.question-plan button div{min-width:0}
+.question-plan strong{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.question-plan small{overflow-wrap:anywhere}
