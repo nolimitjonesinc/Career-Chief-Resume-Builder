@@ -9,6 +9,22 @@ export const sourceLabels = {
   other: "Other context",
 };
 
+// What a source should inform, separate from what it is. A deck about a launch is
+// "Current role" material by kind but might be meant for the cover letter.
+export const focusLabels = {
+  auto: "Let Career Chief decide",
+  current: "My current role",
+  past: "Past roles and accomplishments",
+  target: "The role I want",
+  cover: "My future cover letter",
+};
+
+const hasFocus = (source) => source.focus && source.focus !== "auto";
+export const isCareerSource = (source) => hasFocus(source) ? source.focus !== "target" : ["resume", "current", "goals", "other"].includes(source.kind);
+export const isRoleSource = (source) => hasFocus(source) ? source.focus === "target" : ["job", "application"].includes(source.kind);
+const isCurrentRoleSource = (source) => hasFocus(source) ? source.focus === "current" : source.kind === "current";
+const isResearchSource = (source) => hasFocus(source) ? source.focus === "target" : !["resume", "current", "goals"].includes(source.kind);
+
 const sampleResume = `Jordan Avery\nBrand Marketing Leader\nSan Francisco, CA · jordan@example.com\nRivermark Health — Senior Brand Marketing Manager, 2021–present\nLed brand positioning and customer education. Managed agency and content partnerships. Led six direct reports across brand and content.\nLume Collective — Brand Marketing Manager, 2018–2021\nDeveloped brand strategy for consumer clients. Directed customer storytelling.\nBA Communications, 2015`;
 
 export const sampleSources = [
@@ -55,6 +71,22 @@ function makeDoc(resumeText, role, candidateContext = "") {
   };
 }
 
+// Presentations show the work; the user decides what to claim from it. One
+// question per deck (up to three) asks exactly that, naming the deck.
+function deckQuestions(sources) {
+  return sources.filter((source) => source.format === "pptx").slice(0, 3).map((source) => {
+    const titles = [...source.text.matchAll(/^Slide \d+(?: \(hidden\))?: (.+)$/gm)].map((match) => match[1]).filter((title) => title !== "Untitled").slice(0, 3);
+    const covers = titles.length ? ` covers ${titles.map((title) => `“${title}”`).join(", ")}` : " is loaded";
+    const name = source.name.replace(/\.pptx$/i, "");
+    const prompt = {
+      current: `Your deck “${name}”${covers}. What was your part in it, and what should your current-role section say about it?`,
+      target: `Your deck “${name}”${covers}. What in it matters most for the role you want, and where have you already done similar work?`,
+      cover: `Your deck “${name}”${covers}. What is the story behind it that you would want a hiring manager to hear first?`,
+    }[source.focus] || `Your deck “${name}”${covers}. What was your part in it, and what should your resume say about it?`;
+    return { id: `deck-${source.id}`, priority: "Highest value", topic: `Deck: ${name}`.slice(0, 70), prompt, section: source.focus === "current" ? "current" : undefined, why: "Presentations show the work that rarely makes it onto a resume. Your answer decides what the resume claims from it.", tip: "Rough notes are fine: your role, who it was for, decisions you made, and any numbers from the deck you want on the resume." };
+  });
+}
+
 function questionPlan(allText, role, isSample) {
   if (isSample) return [
     { id: "ownership", priority: "Highest value", topic: "Program ownership", prompt: "You mention content partnerships. What did you personally build—from the first idea through the operating process?", why: "The role asks for a builder. A partnership alone does not prove personal ownership.", tip: "Think about strategy, contributor sourcing, partner selection, approvals, and the process you created.", sample: "I created the customer and expert content program. I developed the strategy, set up participant sourcing with Sales and Operations, selected the production partner, and approved stories and final edits." },
@@ -79,8 +111,8 @@ function questionPlan(allText, role, isSample) {
 export function analyzeSources(sources, meta) {
   const allText = sources.map((source) => source.text).join("\n");
   const resumeText = sources.find((source) => source.kind === "resume")?.text || "";
-  const careerText = sources.filter((source) => ["resume", "current", "goals", "other"].includes(source.kind)).map((source) => source.text).join(" ");
-  const jobText = sources.filter((source) => ["job", "application"].includes(source.kind)).map((source) => source.text).join(" ");
+  const careerText = sources.filter(isCareerSource).map((source) => source.text).join(" ");
+  const jobText = sources.filter(isRoleSource).map((source) => source.text).join(" ");
   const lowerCareer = careerText.toLowerCase();
   const lowerJob = jobText.toLowerCase();
   const supportPatterns = {
@@ -96,10 +128,11 @@ export function analyzeSources(sources, meta) {
   };
   const requirements = priorities.filter(([key]) => lowerJob.includes(key)).map(([key, label]) => ({ key, label, supported: supportPatterns[key].test(lowerCareer) }));
   const isSample = sources.some((source) => source.id === "sample-job");
-  const questions = questionPlan(allText, meta.role, isSample);
+  const baseQuestions = questionPlan(allText, meta.role, isSample);
+  const questions = [...baseQuestions.slice(0, 1), ...deckQuestions(sources), ...baseQuestions.slice(1)];
   const known = requirements.filter((item) => item.supported).map((item) => item.label);
   const gaps = requirements.filter((item) => !item.supported).map((item) => item.label);
-  const research = sources.filter((source) => !["resume", "current", "goals"].includes(source.kind)).map((source) => ({
+  const research = sources.filter(isResearchSource).map((source) => ({
     id: source.id,
     label: sourceLabels[source.kind],
     title: source.name,
@@ -108,7 +141,9 @@ export function analyzeSources(sources, meta) {
     origin: source.origin,
   }));
   return {
-    doc: makeDoc(resumeText, meta.role, sources.filter((source) => source.kind === "current").map((source) => source.text).join(" ")),
+    // Deck text is slide-by-slide, so its first sentence makes a poor resume line;
+    // decks feed the interview instead.
+    doc: makeDoc(resumeText, meta.role, sources.filter((source) => isCurrentRoleSource(source) && source.format !== "pptx").map((source) => source.text).join(" ")),
     questions,
     requirements,
     research,
@@ -130,7 +165,5 @@ export function proposeResumeUpdate(doc, question, answer) {
   if (question.id === "ownership" && /customer and expert content program/i.test(cleanAnswer)) {
     return "Built a customer and expert content program, creating the strategy and participant-sourcing process with Sales and Operations, selecting the production partner, and approving stories and final edits.";
   }
-  return question.id === "results" && !/\d|percent|increase|growth|result|used|adopt/i.test(cleanAnswer)
-    ? `${capitalized.replace(/[.]+$/, "")}. Outcome remains qualitative pending stronger evidence.`
-    : `${capitalized.replace(/[.]+$/, "")}.`;
+  return `${capitalized.replace(/[.]+$/, "")}.`;
 }

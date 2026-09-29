@@ -1,6 +1,6 @@
 # Career Chief
 
-**Last updated:** September 17, 2026
+**Last updated:** September 29, 2026
 **Status:** Prototype
 **Lives at:** local only — dev server at `localhost:5199`. Built to deploy to Cloudflare (Workers + static assets); the project's own notes refer to a "deployed demo" running without an AI key. ‹CHECK› is there a live link, and where?
 **Repo:** `nolimitjonesinc/Career-Chief-Resume-Builder` (private)
@@ -65,7 +65,9 @@ Three ideas hold the whole product together:
 ## 5. Feature list — what exists today
 
 ### Intake
-- Upload and extract text from PDF, DOCX, HTML, TXT, Markdown, and RTF — all in the browser, nothing uploaded to a server.
+- Upload and extract text from PowerPoint (.pptx), PDF, DOCX, HTML, TXT, Markdown, and RTF — all in the browser, nothing uploaded to a server.
+- **PowerPoint reading** pulls slide text in the order the slides are shown, speaker notes (often where people write what they actually did), table rows kept together, and the numbers inside charts. Hidden slides are included and marked. Old .ppt and Keynote files get a plain-English "save it as .pptx" message instead of failing silently.
+- **"What should it help with?"** — every added source can be aimed at a part of the application: my current role, past roles and accomplishments, the role I want, or my future cover letter (or let Career Chief decide). This is separate from what the source *is*.
 - Paste unstructured text directly.
 - Add a public HTTPS web page; a small server reader pulls its text, with URL validation plus size and timeout limits, and falls back to paste/upload when a page won't cooperate.
 - Sources are categorized: resume, job description, application questions, company research, leadership, current role, career goals, other.
@@ -85,6 +87,7 @@ Three ideas hold the whole product together:
 - A prioritized question plan, always visible with progress, one question in focus at a time.
 - Each question shows why it's being asked and a tip for answering.
 - Rule mode: six generic questions, or a seven-question fictional sample plan. AI mode: 3–7 questions generated from your actual evidence.
+- **Deck questions** — each uploaded deck (up to three) gets its own question naming the deck and its slide titles: what was your part, and what should the resume say about it. Deck answers aimed at the current role are added to the current-role section instead of the tailored achievement line.
 - Answer-dependent follow-ups — in AI mode the model can return one narrow follow-up per answer when a real ambiguity remains.
 - Questions can be skipped, and you can finish at any time.
 
@@ -114,19 +117,21 @@ Three ideas hold the whole product together:
   - `src/lib/analyze.js` — the rule-based analyzer, sample case data, question plans, resume-change proposals.
   - `shared/career-ai.mjs` — the AI research and interview engine, its prompts, JSON handling, and citation filter.
   - `src/lib/ingest.js` — file and URL text extraction.
+  - `src/lib/pptx.js` — the PowerPoint reader (slides, notes, tables, charts), dependency-light and tested in Node.
+  - `shared/source-limits.mjs` — how much of each source the AI sees; used by the browser (trims before sending) and the server (trims again).
   - `src/lib/exporters.js` — DOCX, PDF, HTML, TXT output.
   - `shared/url-extract.mjs` — public-page fetching and safety limits, shared by dev server and production worker.
   - `worker/index.js` — production hosting: the API routes plus SPA fallback.
   - `src/career.css`, `src/styles.css` — styling.
-  - `tests/sites-worker.test.mjs` — five hosting/API tests. `tests/career-ai.test.mjs` — three AI tests using a controlled fake response.
+  - `tests/sites-worker.test.mjs` — five hosting/API tests. `tests/career-ai.test.mjs` — three AI tests using a controlled fake response. `tests/pptx.test.mjs` — two PowerPoint reader tests.
   - `AGENTS.md` — instructions left for coding agents working in this repo.
 
 ## 7. Rules of the house
 
 Decisions that must not be reversed. Check every new request against these.
 
-1. **Never state a claim the user hasn't confirmed they personally own.** Public company material and campaign pages are context, not proof of the candidate's contribution. This is the product's entire credibility, and it is written into the AI prompt as well as the UI.
-2. **No invented metrics, ever.** A credible qualitative result beats a guessed number. Both the rule engine and the AI prompt enforce this.
+1. **It's the user's resume, and the user decides what goes in it.** (Danny, Sep 29, 2026: "we don't want to limit what a user can put in their resume.") Career Chief's job is to dig through everything they share — decks, docs, notes — and propose strong wording; the user can rewrite anything. What the app never does is slip in a claim the user hasn't seen and approved, and public company material is context about the company, not proof of the candidate's work.
+2. **The app never makes up numbers.** Figures from the user's own material (a deck's chart, their answer) are fair game; the AI never invents one. The user can type whatever they want. The old rule-mode tag "Outcome remains qualitative pending stronger evidence" was removed Sep 29, 2026 because it wrote a caveat into the user's resume.
 3. **Nothing enters the resume without explicit approval.** Review-before-apply, editable wording, and undo are not optional polish.
 4. **Manual user edits are protected.** Once the user has written their own wording, nothing overwrites it silently.
 5. **One question in focus, but the full plan stays visible.** An earlier version hid the plan and the whole product read as a single-question demo.
@@ -150,6 +155,8 @@ These are documented limits, not bugs to rediscover.
 - **No size limit on what comes back from the AI.** Outbound requests are capped and timed out, but the response is parsed whole with no ceiling, unlike the public-page reader which caps at a megabyte. A malformed or hostile response could balloon memory. Lower severity than the two above, and the fix is to mirror the pattern the link reader already uses.
 - **The public-page reader is not safe to expose publicly (SSRF).** It blocks unsafe addresses by *name* — rejecting `localhost`, `.local`, bare hostnames and raw IPs as text patterns. It never checks where a hostname actually points, so an ordinary-looking address resolving to a private or internal machine (or a cloud metadata endpoint) passes, and the app fetches it on the user's behalf. Redirects are followed and re-checked with the same weak test, after the request has gone out. Harmless running locally for one person; must be closed before public deployment, and the correct fix differs between the Node dev server and the Cloudflare Worker. Flagged by automated review Sep 17, 2026 and unchanged in this version.
 - **Storage is one browser on one device.** No accounts, no encryption, no cross-device sync, no version history, no audit trail, no server-side deletion controls. Clearing site data wipes everything.
+- **PowerPoint: text only.** Words, notes, tables and chart numbers are read; text baked into images or screenshots, SmartArt, and embedded videos are not. Old .ppt, Keynote and OpenDocument decks must be re-saved as .pptx first. Decks are capped at 200 slides and 150 MB.
+- **Cover letter not built yet.** Sources can already be aimed at "my future cover letter" and the AI is told about that focus, but no cover letter is produced.
 - **Resume parsing is lightweight.** Complex columns, tables, scanned PDFs, OCR, comments, tracked changes, and embedded media all need a production parser.
 - **Link reading is limited.** Text-only; login walls, JavaScript-only pages, and robots restrictions will fail. Linked PDFs and Word files must be downloaded and uploaded manually.
 - **Exports don't preserve the original layout.** They generate fresh documents from the approved draft.

@@ -2,15 +2,18 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./career.css";
 import {
   ArrowCounterClockwise, ArrowRight, ArrowSquareOut, CaretDown, Check, CheckCircle,
-  Circle, DownloadSimple, FileDoc, FileHtml, FilePdf, FileText, Globe, Leaf, Link,
+  Circle, DownloadSimple, FileDoc, FileHtml, FilePdf, FilePpt, FileText, Globe, Leaf, Link,
   MagnifyingGlass, Paperclip, Plus, ShieldCheck, Sparkle, Target, UploadSimple, X,
 } from "@phosphor-icons/react";
 import { acceptedFiles, extractFile, extractUrl } from "./lib/ingest";
-import { analyzeSources, proposeResumeUpdate, sampleSources, sourceLabels } from "./lib/analyze";
+import { analyzeSources, focusLabels, isCareerSource, proposeResumeUpdate, sampleSources, sourceLabels } from "./lib/analyze";
+import { trimForAi } from "../shared/source-limits.mjs";
 import { exportResume } from "./lib/exporters";
 
 const blankMeta = { company: "", role: "" };
-const blankSource = { kind: "current", mode: "text", name: "", text: "", url: "", parsedFile: null };
+const blankSource = { kind: "current", focus: "auto", mode: "text", name: "", text: "", url: "", parsedFile: null };
+const fileOrigin = (file, extracted) => [`${file.name.split(".").pop().toUpperCase()} upload`, extracted.summary, `${extracted.characters.toLocaleString()} characters`].filter(Boolean).join(" · ");
+const fileFormat = (file) => file.name.toLowerCase().endsWith(".pptx") ? "pptx" : undefined;
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const storageKey = "career-chief-local-draft-v1";
 function readDraft() { try { return JSON.parse(localStorage.getItem(storageKey) || "null"); } catch { return null; } }
@@ -92,7 +95,7 @@ export function App() {
     setBusy(`Reading ${file.name}…`);
     try {
       const extracted = await extractFile(file);
-      const source = { id: uid(), kind, name: extracted.name, origin: `${file.name.split(".").pop().toUpperCase()} upload · ${extracted.characters.toLocaleString()} characters`, text: extracted.text, status: "ready" };
+      const source = { id: uid(), kind, format: fileFormat(file), name: extracted.name, origin: fileOrigin(file, extracted), text: extracted.text, status: "ready" };
       addSource(source);
       setNotice(`${file.name} was read and added to the analysis.`);
     } catch (error) {
@@ -161,7 +164,7 @@ export function App() {
   async function runAiPlan(nextSources, targetMeta = meta, preserveProgress = false) {
     setBusy("Researching the company and rebuilding your hiring case…");
     try {
-      const response = await fetch("/api/ai/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meta: targetMeta, sources: nextSources }) });
+      const response = await fetch("/api/ai/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meta: targetMeta, sources: nextSources.map(trimForAi) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "AI research could not complete.");
       setAnalysis((previous) => ({ ...previous, ...result, research: [...(previous?.research || []).filter((item) => !item.id?.startsWith("web-")), ...result.research], researchMode: "ai", doc: previous.doc }));
@@ -185,13 +188,13 @@ export function App() {
       let source;
       if (sourceDraft.mode === "link") {
         const result = await extractUrl(sourceDraft.url.trim());
-        source = { id: uid(), kind: sourceDraft.kind, name: sourceDraft.name || result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" };
+        source = { id: uid(), kind: sourceDraft.kind, focus: sourceDraft.focus, name: sourceDraft.name || result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" };
       } else if (sourceDraft.mode === "file") {
         if (!sourceDraft.parsedFile) throw new Error("Choose a readable file first.");
-        source = { ...sourceDraft.parsedFile, id: uid(), kind: sourceDraft.kind, name: sourceDraft.name || sourceDraft.parsedFile.name, status: "ready" };
+        source = { ...sourceDraft.parsedFile, id: uid(), kind: sourceDraft.kind, focus: sourceDraft.focus, name: sourceDraft.name || sourceDraft.parsedFile.name, status: "ready" };
       } else {
         if (sourceDraft.text.trim().length < 10) throw new Error("Add a little more context first.");
-        source = { id: uid(), kind: sourceDraft.kind, name: sourceDraft.name || sourceLabels[sourceDraft.kind], origin: "User-supplied text", text: sourceDraft.text.trim(), status: "ready" };
+        source = { id: uid(), kind: sourceDraft.kind, focus: sourceDraft.focus, name: sourceDraft.name || sourceLabels[sourceDraft.kind], origin: "User-supplied text", text: sourceDraft.text.trim(), status: "ready" };
       }
       addSource(source);
       setSourceDraft({ ...blankSource });
@@ -208,7 +211,7 @@ export function App() {
     setBusy(`Reading ${file.name}…`);
     try {
       const extracted = await extractFile(file);
-      setSourceDraft((value) => ({ ...value, name: value.name || extracted.name, parsedFile: { name: extracted.name, origin: `${file.name.split(".").pop().toUpperCase()} upload · ${extracted.characters.toLocaleString()} characters`, text: extracted.text } }));
+      setSourceDraft((value) => ({ ...value, name: value.name || extracted.name, parsedFile: { name: extracted.name, format: fileFormat(file), origin: fileOrigin(file, extracted), text: extracted.text } }));
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -243,12 +246,15 @@ export function App() {
     // A follow-up sharpens an answer already given, so its wording replaces the
     // earlier line for that topic instead of stacking a near duplicate beneath
     // it. Replacing the exact text leaves any hand-edited lines untouched.
+    // Current-role answers (often a deck about the newest job) extend that
+    // section instead of the tailored achievement.
+    const section = question.section === "current" ? "current" : "tailored";
     const earlier = answers.find((item) => item.topic === question.topic);
     setDoc((value) => ({
       ...value,
-      tailored: earlier && value.tailored.includes(earlier.resumeLine)
-        ? value.tailored.replace(earlier.resumeLine, line)
-        : (value.tailored && answers.length ? `${value.tailored}\n${line}` : line),
+      [section]: earlier && value[section].includes(earlier.resumeLine)
+        ? value[section].replace(earlier.resumeLine, line)
+        : section === "current" || (value.tailored && answers.length) ? `${value[section]}\n${line}` : line,
     }));
     setAnswers((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), questionId: question.id, topic: question.topic, question: question.prompt, text: savedAnswer, resumeLine: line }]);
     setCareerBank((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), topic: question.topic, question: question.prompt, text: savedAnswer, origin: `${meta.company || "Opportunity"} interview` }]);
@@ -318,7 +324,7 @@ export function App() {
     if (!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20) return;
     const key = uid();
     const nextMeta = { company: newOpportunity.company.trim(), role: newOpportunity.role.trim() };
-    const shared = sources.filter((source) => source.id !== "career-bank" && ["resume", "current", "goals", "other"].includes(source.kind));
+    const shared = sources.filter((source) => source.id !== "career-bank" && isCareerSource(source));
     const supplied = resumeText.trim() ? [{ id: "pasted-resume", kind: "resume", name: "Pasted resume", origin: "Pasted text", text: resumeText.trim(), status: "ready" }] : [];
     const interviewSource = careerBank.length ? [{ id: "career-bank", kind: "current", name: "Confirmed interview answers", origin: "User-supplied career evidence", text: careerBank.map((item) => `${item.topic}: ${item.text}`).join("\n"), status: "ready" }] : [];
     const roleSource = { id: uid(), kind: "job", name: `${nextMeta.role} brief`, origin: "Pasted job description", text: newOpportunity.job.trim(), status: "ready" };
@@ -405,7 +411,7 @@ function Header({ hasDraft, finish, home }) {
 
 function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {
   return <main className="intake-page">
-    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1>Give me the messy pile.<br/>I’ll find the story.</h1><p>Bring the resume, the role, and anything else that could change the hiring case. You do not have to organize it first.</p><button className="text-action sample-link" onClick={loadSample}>Load Jordan’s complete fictional case <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>Useful context can come from anywhere.</strong><br/>PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
+    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1>Give me the messy pile.<br/>I’ll find the story.</h1><p>Bring the resume, the role, and anything else that could change the hiring case. You do not have to organize it first.</p><button className="text-action sample-link" onClick={loadSample}>Load Jordan’s complete fictional case <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>Useful context can come from anywhere.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
       <div className="builder-head"><div><span className="step-number">1</span><h2>Start with what you have.</h2></div><span className="source-count">{sources.length + (resumeText.trim() ? 1 : 0) + (jobText.trim() ? 1 : 0)} sources ready</span></div>
       <SourceBlock icon={<FileText size={22} />} title="Your resume" required note="PDF, Word, HTML, TXT or pasted text">
@@ -419,7 +425,7 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
         <label className="upload-control"><Paperclip size={17} /> Upload job or application file<input type="file" accept={acceptedFiles} onChange={(event) => addFile(event.target.files[0], "job")} /></label>
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}
-      <button type="button" className="add-source" onClick={openSource}><Plus size={19} /> Add current responsibilities, company research, CEO context, goals, or another document</button>
+      <button type="button" className="add-source" onClick={openSource}><Plus size={19} /> Add presentations, current responsibilities, company research, CEO context, goals, or another document</button>
       {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to OpenAI for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
       <button className="primary wide" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
       {!canBegin && <p className="form-hint">Add a resume, target role, and job description or job file to begin.</p>}
@@ -431,14 +437,14 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
 function SourceBlock({ icon, title, required, note, children }) { return <section className="source-block"><div className="source-block-title"><span>{icon}</span><div><strong>{title}{required && " *"}</strong><small>{note}</small></div></div>{children}</section>; }
 
 function SourceRow({ source, remove }) {
-  const Icon = source.name?.toLowerCase().endsWith("pdf") ? FilePdf : source.name?.toLowerCase().match(/docx?$/) ? FileDoc : source.url ? Globe : source.name?.toLowerCase().match(/html?$/) ? FileHtml : FileText;
-  return <div className="source-row"><Icon size={21} /><div><strong>{source.name}</strong><small>{sourceLabels[source.kind]} · {source.origin}</small></div><span className="ready"><Check size={14} /> Ready</span>{remove && <button type="button" aria-label={`Remove ${source.name}`} onClick={remove}><X size={16} /></button>}</div>;
+  const Icon = source.format === "pptx" ? FilePpt : source.name?.toLowerCase().endsWith("pdf") ? FilePdf : source.name?.toLowerCase().match(/docx?$/) ? FileDoc : source.url ? Globe : source.name?.toLowerCase().match(/html?$/) ? FileHtml : FileText;
+  return <div className="source-row"><Icon size={21} /><div><strong>{source.name}</strong><small>{sourceLabels[source.kind]}{source.focus && source.focus !== "auto" && source.focus !== source.kind ? ` · for ${focusLabels[source.focus].toLowerCase()}` : ""} · {source.origin}</small></div><span className="ready"><Check size={14} /> Ready</span>{remove && <button type="button" aria-label={`Remove ${source.name}`} onClick={remove}><X size={16} /></button>}</div>;
 }
 
 function AnalysisReady({ analysis, sources, open }) {
   const steps = [
     ["Extracted the source material", `${analysis.sourceCount} sources · ${analysis.characterCount.toLocaleString()} characters`],
-    ["Separated facts from inference", `${sources.filter((source) => ["resume","current","goals"].includes(source.kind)).length} career sources · ${sources.filter((source) => !["resume","current","goals"].includes(source.kind)).length} opportunity sources`],
+    ["Separated facts from inference", `${sources.filter(isCareerSource).length} career sources · ${sources.filter((source) => !isCareerSource(source)).length} opportunity sources`],
     ["Mapped the role requirements", `${analysis.requirements.length || "Core"} priorities found`],
     ["Built the hiring case", `${analysis.known.length} supported themes · ${analysis.gaps.length} themes to clarify`],
     ["Created the interview plan", `${analysis.questions.length} questions, ordered by value`],
@@ -463,7 +469,7 @@ function Interview({ questions, index, status, answer, setAnswer, review, skip, 
 }
 
 function CareerEvidence({ sources, answers, inspect, add, clear }) {
-  const career = sources.filter((source) => ["resume", "current", "goals", "other"].includes(source.kind));
+  const career = sources.filter(isCareerSource);
   return <><span className="eyebrow">Your reusable career record</span><h1>Remember it once.<br/>Use it thoughtfully.</h1><p className="lead">Career evidence can support more than one application. Each company still gets its own strategy and resume draft.</p><div className="section-title"><div><h3>Career sources</h3><p>Documents and context you supplied.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add context</button></div>{career.map((source) => <button className="evidence-card" key={source.id} onClick={() => inspect(source)}><span className="badge">{sourceLabels[source.kind]} · supplied</span><strong>{source.name}</strong><p>{source.text.slice(0, 180)}{source.text.length > 180 ? "…" : ""}</p></button>)}<div className="section-title answer-title"><div><h3>Evidence gathered in the interview</h3><p>These answers are user-supplied, not independently verified.</p></div><span className="count-pill">{answers.length}</span></div>{answers.length ? answers.map((item) => <article className="answer-evidence" key={item.id}><span className="badge">{item.topic}</span><p>{item.text}</p><small>Resume wording: {item.resumeLine}</small></article>) : <div className="empty-card">Useful answers will collect here as you work through the question plan.</div>}<button className="text-action" onClick={clear}>Clear saved draft from this device</button></>;
 }
 
@@ -472,12 +478,12 @@ function Resume({ doc, answered }) {
 }
 
 function SourceForm({ draft, setDraft, prepareFile, save, busy }) {
-  return <><h2>Add context from anywhere.</h2><p>Paste rough notes, upload a document, or bring in a public webpage. It will be analyzed with the rest of the case.</p><label>What kind of context is this?<select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })}>{Object.entries(sourceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><div className="mode-tabs">{[['text','Paste text'],['file','Upload file'],['link','Public link']].map(([value,label]) => <button key={value} className={draft.mode === value ? "active" : ""} onClick={() => setDraft({ ...draft, mode: value })}>{label}</button>)}</div><label>Source name <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Optional label" /></label>{draft.mode === "text" && <label>Notes or evidence<textarea value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} placeholder="Paste anything useful. You do not have to organize it." /></label>}{draft.mode === "file" && <label className="drop-upload"><UploadSimple size={25} /><strong>Choose PDF, DOCX, HTML, TXT, Markdown, or RTF</strong><span>{draft.parsedFile ? `${draft.parsedFile.name} is ready` : "The text is extracted in this session."}</span><input type="file" accept={acceptedFiles} onChange={(event) => prepareFile(event.target.files[0])} /></label>}{draft.mode === "link" && <label>Public HTTPS link<input type="url" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label>}<p className="quiet">Only share information you are permitted to use. A source is evidence—not automatic proof that every statement is true.</p><button className="primary" disabled={busy} onClick={save}>Add and analyze this source <ArrowRight size={18} /></button></>;
+  return <><h2>Add context from anywhere.</h2><p>Paste rough notes, upload a presentation or document, or bring in a public webpage. Tell me what it should help with and I’ll dig through it with that in mind.</p><div className="two-fields"><label>What is it?<select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })}>{Object.entries(sourceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>What should it help with?<select value={draft.focus} onChange={(event) => setDraft({ ...draft, focus: event.target.value })}>{Object.entries(focusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div><div className="mode-tabs">{[['text','Paste text'],['file','Upload file'],['link','Public link']].map(([value,label]) => <button key={value} className={draft.mode === value ? "active" : ""} onClick={() => setDraft({ ...draft, mode: value })}>{label}</button>)}</div><label>Source name <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Optional label" /></label>{draft.mode === "text" && <label>Notes or evidence<textarea value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} placeholder="Paste anything useful. You do not have to organize it." /></label>}{draft.mode === "file" && <label className="drop-upload"><UploadSimple size={25} /><strong>Choose PowerPoint, PDF, Word, HTML, TXT, Markdown, or RTF</strong><span>{draft.parsedFile ? `${draft.parsedFile.name} is ready · ${draft.parsedFile.origin}` : "Slides, speaker notes, tables and chart numbers are all read, right here in your browser."}</span><input type="file" accept={acceptedFiles} onChange={(event) => prepareFile(event.target.files[0])} /></label>}{draft.mode === "link" && <label>Public HTTPS link<input type="url" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label>}<p className="quiet">Only share information you are permitted to use. A source is evidence—not automatic proof that every statement is true.</p><button className="primary" disabled={busy} onClick={save}>Add and analyze this source <ArrowRight size={18} /></button></>;
 }
 
 function SourceView({ source }) { return <><span className="badge">{sourceLabels[source.kind]} · {source.origin}</span><h2>{source.name}</h2>{source.url && <a className="source-url" href={source.url} target="_blank" rel="noreferrer">{source.url} <ArrowSquareOut size={15} /></a>}<h3>Extracted text</h3><div className="extracted-text">{source.text}</div><p className="quiet">This is the text used by the prototype analyzer. Production should retain source URL, retrieval date, excerpt, and verification status.</p></>; }
 
-function Proposal({ doc, question, answer, proposal, setProposal, apply, manual }) { return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p><span className="eyebrow">CURRENT RESUME LINE</span><p className="old-copy">{doc.tailored}</p><label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><p className="quiet">Adjust anything that overstates your role. Unsupported metrics are not added.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
+function Proposal({ doc, question, answer, proposal, setProposal, apply, manual }) { return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">CURRENT ROLE SECTION · THIS WORDING IS ADDED TO IT</span><p className="prewrap quiet">{doc.current}</p></> : <><span className="eyebrow">CURRENT RESUME LINE</span><p className="old-copy">{doc.tailored}</p></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
 
 function ResumeEditor({ doc, save }) { const [value, setValue] = useState({ ...doc }); const fields = { name: "Name", title: "Professional title", contact: "Contact details", summary: "Professional summary", current: "Current experience", tailored: "Tailored achievement", earlier: "Earlier experience", education: "Education", skills: "Capabilities" }; return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>{Object.entries(fields).map(([key,label]) => <label key={key}>{label}{["summary","current","tailored","earlier","skills"].includes(key) ? <textarea value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} /> : <input value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} />}</label>)}<button className="primary" onClick={() => save(value)}>Save my wording <Check size={18} /></button></>; }
 

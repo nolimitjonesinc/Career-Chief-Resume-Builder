@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** September 17, 2026
+**Last updated:** September 29, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -16,12 +16,15 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] First live run of the AI path against a real account — it has only ever run against a controlled fake response
 - [ ] Hands-on interface check of browser-local autosave and switching between company applications
 - [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser
+- [ ] **Cover letter** as a second finished document, built from approved answers plus sources aimed at "my future cover letter"
+- [ ] Draft resume lines straight from a deck (user approves each) instead of only through the interview
 - [ ] Prepared interview stories to finish the application package (draft screening answers already exist)
 
 ## Doing now
 - [ ] Nothing in flight
 
 ## Done
+- [x] Read PowerPoint decks (slides, speaker notes, tables, chart numbers) and let every source be aimed at current role / past / target role / cover letter; one interview question per deck (Sep 29, 2026)
 - [x] Connect real AI research and an adaptive interview — opt-in, server-held key, cited findings only (Sep 17, 2026)
 - [x] Make the working draft survive a refresh (Sep 17, 2026)
 - [x] Reusable career evidence bank carried between company applications (Sep 17, 2026)
