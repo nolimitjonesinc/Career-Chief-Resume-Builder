@@ -97,6 +97,7 @@ Three ideas hold the whole product together:
 - Full direct editing of all nine resume sections, plus undo history.
 - **Career evidence bank** — confirmed interview answers are kept and fed into the next company's analysis.
 - **Dynamic company applications** — create a new company application that reuses the evidence bank while keeping its own role, questions, and resume draft. Saved applications can be reopened.
+- **Start new** — a header button, shown once anything has been entered, with two choices: apply for a different job (keeps resume, documents and interview answers; the current application stays saved) or erase everything from this browser. The keep option leads; the erase option says plainly it can't be undone. The small "Clear saved draft" link on the first screen now asks for confirmation instead of wiping instantly.
 - **Browser-local autosave** — the whole working draft survives a refresh on the same device, and can be cleared from the source screen or evidence panel.
 - Export to DOCX, PDF, HTML, and TXT.
 

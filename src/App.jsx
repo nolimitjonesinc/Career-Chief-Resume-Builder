@@ -340,12 +340,13 @@ export function App() {
   }
 
   function clearLocalDraft() {
-    localStorage.removeItem(storageKey);
+    try { localStorage.removeItem(storageKey); }
+    catch { /* Storage may be blocked; a reload still starts a fresh session. */ }
     window.location.reload();
   }
 
   return <>
-    <Header hasDraft={Boolean(doc)} finish={() => setModal("finish")} home={() => setModal("home")} />
+    <Header hasDraft={Boolean(doc)} hasAnything={Boolean(doc || sources.length || resumeText.trim() || jobText.trim() || meta.role.trim())} startNew={() => setModal("start-new")} finish={() => setModal("finish")} home={() => setModal("home")} />
     <div className="demo-strip"><strong>WORKING PROTOTYPE</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Source analysis is rule-based. AI research is available when connected and selected."} Your draft is stored in this browser on this device.</span></div>
     {busy && <div className="busy" role="status"><LeafDrop /> {busy}</div>}
     {notice && <div className="notice" role="status"><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice("")}><X size={17} /></button></div>}
@@ -356,7 +357,7 @@ export function App() {
       sources={readySources} loadSample={loadSample} addFile={addFile} readJobLink={readJobLink}
       removeSource={(id) => setSources((items) => items.filter((item) => item.id !== id))}
       openSource={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}
-      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={clearLocalDraft}
+      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
     />}
 
     {screen === "analysis" && analysis && <AnalysisReady analysis={analysis} sources={intakeSources} open={() => { setScreen("workspace"); setTab("case"); }} />}
@@ -394,6 +395,7 @@ export function App() {
       {modal === "opportunity" && <Opportunity meta={meta} projects={savedProjects} openProject={openSavedProject} create={() => setModal("new-opportunity")} />}
       {modal === "new-opportunity" && <><h2>Another company, same career.</h2><p>Add the role and job description. Your confirmed career answers will come along; the resume and questions will be tailored separately.</p><label>Company<input value={newOpportunity.company} onChange={(e) => setNewOpportunity({ ...newOpportunity, company: e.target.value })} placeholder="Company name" /></label><label>Target role<input value={newOpportunity.role} onChange={(e) => setNewOpportunity({ ...newOpportunity, role: e.target.value })} placeholder="Role title" /></label><label>Job description<textarea value={newOpportunity.job} onChange={(e) => setNewOpportunity({ ...newOpportunity, job: e.target.value })} placeholder="Paste the role or application questions. Add other files and links afterward." /></label><button className="primary" disabled={!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20} onClick={createOpportunity}>Build this opportunity <ArrowRight size={18} /></button></>}
       {modal === "home" && <><h2>Return to your source stack?</h2><p>Your current session stays here unless the page is refreshed.</p><button className="primary" onClick={() => { setScreen("intake"); setModal(null); }}>Return to sources</button></>}
+      {modal === "start-new" && <StartNew keepable={Boolean(analysis && doc)} evidenceCount={careerBank.length} newJob={() => setModal("new-opportunity")} finish={() => setModal("finish")} wipe={clearLocalDraft} />}
       {modal === "clear" && <><h2>Clear this device’s draft?</h2><p>This deletes the saved career material, sources, answers, and resume from this browser. Download anything you need first.</p><button className="secondary" onClick={() => setModal(null)}>Keep my draft</button><button className="primary" onClick={clearLocalDraft}>Clear draft</button></>}
     </dialog>
   </>;
@@ -405,8 +407,15 @@ function LeafDrop({ size = 21 }) {
   return <span className="leaf-drop" aria-hidden="true"><Leaf size={size} weight="fill" /></span>;
 }
 
-function Header({ hasDraft, finish, home }) {
-  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Thoughtful careers. Brighter tomorrows.</span>{hasDraft && <button className="primary" onClick={finish}>Finish my resume now</button>}</div></header>;
+function Header({ hasDraft, hasAnything, startNew, finish, home }) {
+  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Thoughtful careers. Brighter tomorrows.</span>{hasAnything && <button className="text-action start-new" onClick={startNew}><ArrowCounterClockwise size={17} /> Start new</button>}{hasDraft && <button className="primary" onClick={finish}>Finish<span className="finish-long">&nbsp;my resume now</span></button>}</div></header>;
+}
+
+// Two very different "start over"s: a new job that keeps everything the user has
+// already told us, or a clean wipe. The keep option leads because a wipe can't
+// be undone and throws away the career evidence the app exists to collect.
+function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
+  return <><h2>Start something new.</h2>{keepable && <><button className="start-choice" onClick={newJob}><strong>Apply for a different job</strong><span>Keep your resume{evidenceCount ? `, your ${evidenceCount} interview ${evidenceCount === 1 ? "answer" : "answers"}` : ""} and every document you added. This application stays saved and you can come back to it.</span><ArrowRight size={19} /></button><p className="quiet">Want a copy of this resume first? <button className="text-action" onClick={finish}>Download it</button></p></>}<div className="start-wipe"><strong>Erase everything and start from scratch</strong><p>Deletes your resume, documents, answers and every saved application from this browser. This can’t be undone.</p><button className="secondary" onClick={wipe}>Erase and start fresh</button></div></>;
 }
 
 function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {

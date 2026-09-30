@@ -44,3 +44,10 @@ label>input,label>textarea,label>select{margin-top:8px}
 .question-plan button div{min-width:0}
 .question-plan strong{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .question-plan small{overflow-wrap:anywhere}
+
+/* Start new: the header button, and the keep-or-erase choice it opens. */
+.start-new{font-size:13px;white-space:nowrap}
+.start-choice{width:100%;display:grid;grid-template-columns:1fr auto;gap:4px 14px;text-align:left;justify-items:start;border:1px solid #87ac9b;background:#f5f8f6;border-radius:9px;padding:16px 18px;margin:8px 0 4px}
+.start-choice strong{font-size:15px}.start-choice span{grid-column:1;font-size:13px;color:var(--muted);line-height:1.5}.start-choice svg{grid-column:2;grid-row:1/3;align-self:center;color:var(--green)}
+.start-wipe{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}.start-wipe strong{font-size:14px}.start-wipe p{font-size:13px;margin:4px 0 12px}
+@media(max-width:650px){header{padding:0 14px}.brand{font-size:21px;gap:6px}.brand svg{width:24px;height:24px}.header-right{gap:12px}.start-new{font-size:12px}.start-new svg{display:none}.finish-long{display:none}.header-right .primary{padding:10px 16px}}

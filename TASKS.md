@@ -24,6 +24,7 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Nothing in flight
 
 ## Done
+- [x] "Start new" button: new job keeping everything, or erase and start fresh; the first-screen clear link now confirms first (Sep 29, 2026)
 - [x] Read PowerPoint decks (slides, speaker notes, tables, chart numbers) and let every source be aimed at current role / past / target role / cover letter; one interview question per deck (Sep 29, 2026)
 - [x] Connect real AI research and an adaptive interview — opt-in, server-held key, cited findings only (Sep 17, 2026)
 - [x] Make the working draft survive a refresh (Sep 17, 2026)
