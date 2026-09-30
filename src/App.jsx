@@ -347,7 +347,7 @@ export function App() {
 
   return <>
     <Header hasDraft={Boolean(doc)} hasAnything={Boolean(doc || sources.length || resumeText.trim() || jobText.trim() || meta.role.trim())} startNew={() => setModal("start-new")} finish={() => setModal("finish")} home={() => setModal("home")} />
-    <div className="demo-strip"><strong>WORKING PROTOTYPE</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Source analysis is rule-based. AI research is available when connected and selected."} Your draft is stored in this browser on this device.</span></div>
+    <div className="demo-strip"><strong>FREE TO TRY</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Your files stay in this browser and are never uploaded."} Your draft is saved on this device.</span></div>
     {busy && <div className="busy" role="status"><LeafDrop /> {busy}</div>}
     {notice && <div className="notice" role="status"><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice("")}><X size={17} /></button></div>}
 
@@ -408,7 +408,7 @@ function LeafDrop({ size = 21 }) {
 }
 
 function Header({ hasDraft, hasAnything, startNew, finish, home }) {
-  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Thoughtful careers. Brighter tomorrows.</span>{hasAnything && <button className="text-action start-new" onClick={startNew}><ArrowCounterClockwise size={17} /> Start new</button>}{hasDraft && <button className="primary" onClick={finish}>Finish<span className="finish-long">&nbsp;my resume now</span></button>}</div></header>;
+  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Free to try. No sign-up.</span>{hasAnything && <button className="text-action start-new" onClick={startNew}><ArrowCounterClockwise size={17} /> Start new</button>}{hasDraft && <button className="primary" onClick={finish}>Finish<span className="finish-long">&nbsp;my resume now</span></button>}</div></header>;
 }
 
 // Two very different "start over"s: a new job that keeps everything the user has
@@ -420,7 +420,7 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
 
 function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {
   return <main className="intake-page">
-    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1>Give me the messy pile.<br/>I’ll find the story.</h1><p>Bring the resume, the role, and anything else that could change the hiring case. You do not have to organize it first.</p><button className="text-action sample-link" onClick={loadSample}>Load Jordan’s complete fictional case <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>Useful context can come from anywhere.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
+    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1>A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li><b>1</b>Bring what you have</li><li><b>2</b>Answer a few questions</li><li><b>3</b>Download your resume</li></ol><button className="text-action sample-link" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
       <div className="builder-head"><div><span className="step-number">1</span><h2>Start with what you have.</h2></div><span className="source-count">{sources.length + (resumeText.trim() ? 1 : 0) + (jobText.trim() ? 1 : 0)} sources ready</span></div>
       <SourceBlock icon={<FileText size={22} />} title="Your resume" required note="PDF, Word, HTML, TXT or pasted text">
