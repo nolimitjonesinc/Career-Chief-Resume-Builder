@@ -66,3 +66,22 @@ test("old saved drafts are walked forward; newer ones are not guessed at", () =>
   assert.equal(migrateDraft({ draftVersion: DRAFT_VERSION + 1 }), null);
   assert.equal(migrateDraft(null), null);
 });
+
+test("a resume line that joins several sentences of a document still traces to it", () => {
+  const joined = [{ id: "r", kind: "resume", name: "Resume.pdf", text: "Rivermark Health — Senior Manager, 2021–present\nLed brand positioning and customer education. Managed agency and content partnerships. Led six direct reports across brand and content.\nBA 2015" }];
+  const t = traceLine("Led brand positioning and customer education. Managed agency and content partnerships. Led six direct reports across brand and content.", { answers: [], sources: joined });
+  assert.equal(t.status, "document");
+  assert.deepEqual(t.unsupportedNumbers, []);
+});
+
+test("evidence excerpts never run across two documents or end mid-word", async () => {
+  const { evaluateRequirements } = await import("../src/lib/analyze.js");
+  const career = ["BA Communications, 2015", "Jordan created a customer and expert content program, set up participant sourcing with Sales and Operations, selected the production partner, approved stories and final edits, and coaches a six-person team."].join("\n");
+  const [item] = evaluateRequirements("build a creator program", career);
+  assert.ok(!item.evidence.includes("2015 Jordan"));
+  assert.ok(item.evidence.startsWith("Jordan created"));
+  const cut = item.evidence.replace(/…$/, "");
+  const sentence = career.split("\n")[1];
+  assert.ok(sentence.startsWith(cut), "excerpt is a real prefix of the sentence");
+  assert.ok(cut === sentence || /\s/.test(sentence[cut.length]), "cut falls on a word boundary");
+});

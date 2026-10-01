@@ -31,9 +31,15 @@ export function numbersIn(text) {
   return out;
 }
 
-// Figures in `line` that appear in none of `supports` (texts the user supplied).
-export function unsupportedNumbers(line, supports) {
+// The set of figures present anywhere in `supports` (texts the user supplied).
+export function knownNumbers(supports) {
   const known = new Set();
   for (const text of supports) for (const token of numbersIn(text)) known.add(token);
-  return [...numbersIn(line)].filter((token) => !known.has(token));
+  return known;
 }
+
+// Figures in `line` missing from a precomputed known set.
+export const unsupportedFrom = (line, known) => [...numbersIn(line)].filter((token) => !known.has(token));
+
+// Figures in `line` that appear in none of `supports`.
+export const unsupportedNumbers = (line, supports) => unsupportedFrom(line, knownNumbers(supports));

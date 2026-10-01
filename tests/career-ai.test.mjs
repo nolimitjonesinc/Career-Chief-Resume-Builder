@@ -129,3 +129,26 @@ test("ask-for-a-change rewords one line, keeps the request out of the facts, and
 test("unknown AI routes are a 404, not a model call", async () => {
   assert.equal((await handleCareerAI(req("/api/ai/other", {}), on(), async () => { throw new Error("no"); })).status, 404);
 });
+
+test("OPENAI_BASE_URL redirects provider calls to a gateway", async () => {
+  let seen;
+  const fetcher = async (url) => { seen = String(url); return modelResponse(JSON.stringify({ proposal: "Did it." })); };
+  await handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "q" }, answer: "a" }), on({ OPENAI_BASE_URL: "http://127.0.0.1:8788/v1/" }), fetcher);
+  assert.equal(seen, "http://127.0.0.1:8788/v1/responses");
+});
+
+test("default limits fit one real interview: a plan, a dozen answer checks and a few rewrites", async () => {
+  const env = on();
+  const headers = { "x-forwarded-for": "203.0.113.77" };
+  const plan = { meta: { company: "", role: "R" }, sources: [{ kind: "resume", text: "Alex led a team.", name: "R" }, { kind: "job", text: "Lead.", name: "J" }] };
+  const fetcher = async (_u, options) => {
+    const body = JSON.parse(options.body);
+    if (String(body.instructions).includes("revising ONE")) return modelResponse(JSON.stringify({ proposal: "Led a team.", note: "" }));
+    if (String(body.instructions).includes("FOLLOW-UP RULES")) return modelResponse(JSON.stringify({ proposal: "Led a team.", followUp: null }));
+    return modelResponse(JSON.stringify({ thesis: "t", strongestFit: "f", caution: "c", known: [], gaps: [], questions: [{ topic: "T", prompt: "P?", why: "w", tip: "t" }], research: [] }));
+  };
+  const statuses = [(await handleCareerAI(req("/api/ai/plan", plan, headers), env, fetcher)).status];
+  for (let i = 0; i < 12; i += 1) statuses.push((await handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "q" }, answer: "a" }, headers), env, fetcher)).status);
+  for (let i = 0; i < 3; i += 1) statuses.push((await handleCareerAI(req("/api/ai/revise", { answer: "a", current: "c", instruction: "shorter" }, headers), env, fetcher)).status);
+  assert.deepEqual([...new Set(statuses)], [200]);
+});

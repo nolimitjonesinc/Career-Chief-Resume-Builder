@@ -9,14 +9,17 @@ const fromEnv = (env, name, fallback) => {
 
 export function aiLimits(env = {}) {
   return {
-    // One "unit" is one plan or one answer check. A plan is several model calls
-    // (research + reasoning), so a unit is deliberately conservative.
-    dailyUnits: fromEnv(env, "AI_DAILY_UNIT_CAP", 40),
-    // Per caller (hashed IP), per hour. Stops one person draining the day's cap.
-    perCallerPerHour: fromEnv(env, "AI_PER_CALLER_HOURLY", 6),
+    // Units are a proxy for spend, not dollars: a plan (research with web search
+    // plus the reasoning model) is 10, an answer check or rewrite is 1. The
+    // ratio is an ESTIMATE; measure real cost on the first live run and retune.
+    // Defaults: about 30 full plans a day for the whole site.
+    dailyUnits: fromEnv(env, "AI_DAILY_UNIT_CAP", 300),
+    // Per caller (hashed IP), per hour. Sized so one real session (a plan, a
+    // dozen answer checks, a few rewrites) fits, but one person can't drain the day.
+    perCallerPerHour: fromEnv(env, "AI_PER_CALLER_HOURLY", 30),
     // Largest body we will read back from the model provider.
     maxResponseBytes: fromEnv(env, "AI_MAX_RESPONSE_BYTES", 1_000_000),
   };
 }
 
-export const unitCost = { "/api/ai/plan": 3, "/api/ai/follow-up": 1, "/api/ai/revise": 1 };
+export const unitCost = { "/api/ai/plan": 10, "/api/ai/follow-up": 1, "/api/ai/revise": 1 };

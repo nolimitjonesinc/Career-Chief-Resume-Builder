@@ -176,6 +176,10 @@ const routes = {
   "/api/ai/revise": { validate: (payload) => { if (!reviseOk(payload)) throw new Error("Wording, an answer and a request are needed."); }, run: revise },
 };
 
+// Point the provider at a gateway, proxy or local fake by setting OPENAI_BASE_URL
+// (for example http://127.0.0.1:8788/v1). Operator-set, never from the request.
+const withBaseUrl = (fetchImpl, base) => (base ? (url, options) => fetchImpl(String(url).replace("https://api.openai.com/v1", base.replace(/\/$/, "")), options) : fetchImpl);
+
 export async function handleCareerAI(request, env = {}, fetchImpl = fetch) {
   const pathname = new URL(request.url).pathname;
   if (pathname === "/api/ai/status") return Response.json({ enabled: aiSwitchOn(env) });
@@ -190,7 +194,7 @@ export async function handleCareerAI(request, env = {}, fetchImpl = fetch) {
     const payload = JSON.parse(raw);
     route.validate(payload);
     await spendOrThrow(request, env, costOf(pathname));
-    return Response.json(await route.run(payload, env.OPENAI_API_KEY, fetchImpl, aiLimits(env).maxResponseBytes));
+    return Response.json(await route.run(payload, env.OPENAI_API_KEY, withBaseUrl(fetchImpl, env.OPENAI_BASE_URL), aiLimits(env).maxResponseBytes));
   } catch (error) {
     if (error instanceof GuardError) return Response.json({ error: error.message }, { status: error.status, headers: error.retryAfter ? { "retry-after": String(error.retryAfter) } : {} });
     return Response.json({ error: error instanceof SyntaxError ? "That request could not be read." : error.message || "AI research could not complete." }, { status: 422 });

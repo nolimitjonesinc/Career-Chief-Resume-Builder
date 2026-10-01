@@ -61,3 +61,15 @@ test("rule mode is no longer marketing-only: an engineering post finds engineeri
   assert.equal(byKey.hiring.supported, false);
   assert.ok(byKey.engineering.evidence.includes("cloud infrastructure"));
 });
+
+test("every probe has its own topic, because saved answers are keyed by topic", () => {
+  const sources = [resume("Led brand positioning and customer education across the business.\nManaged agency and content partnerships for the company.\nDirected customer storytelling for consumer clients.")];
+  const topics = probeQuestions(sources, isCareer).map((q) => q.topic);
+  assert.equal(new Set(topics).size, topics.length);
+  assert.ok(topics.length >= 2);
+});
+
+test("the sample asks one own-words question, not a repeat of what the first question covers", () => {
+  const result = analyzeSources(sampleSources.map((s) => ({ ...s })), { company: "Nestwell", role: "Senior Director, Content & Community" });
+  assert.equal(result.questions.filter((q) => q.probe).length, 1);
+});

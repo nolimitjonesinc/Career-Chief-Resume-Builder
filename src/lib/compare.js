@@ -6,7 +6,7 @@ import { evaluateRequirements, isCareerSource } from "./analyze.js";
 export const MAX_JOBS = 3;
 
 export function compareJobs(sources, answerTexts, jobs) {
-  const career = [...sources.filter(isCareerSource).map((source) => source.text), ...answerTexts].join(" ");
+  const career = [...sources.filter(isCareerSource).map((source) => source.text), ...answerTexts].join("\n");
   const results = jobs.filter((job) => String(job.text || "").trim().length >= 20).slice(0, MAX_JOBS).map((job) => {
     const requirements = evaluateRequirements(job.text, career);
     const solid = requirements.filter((item) => item.strength === "solid");

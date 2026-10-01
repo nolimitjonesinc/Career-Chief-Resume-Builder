@@ -77,10 +77,10 @@ export function careerShape(resumeText, now = new Date().getFullYear()) {
   return { roles, gaps, overlaps, shortStints };
 }
 
-export function probeQuestions(sources, isCareer = defaultIsCareer, now) {
+export function probeQuestions(sources, isCareer = defaultIsCareer, now, max = 3) {
   const questions = [];
   for (const line of unquantifiedLines(sources, isCareer)) {
-    questions.push({ id: `probe-scale-${hash(line)}`, probe: true, priority: "From your own words", topic: "How big was it?", prompt: `You wrote “${clip(line)}”. How big was that: people, budget, volume, time, or customers affected?`, why: "A line with no scale reads as a duty, not a result. Only you know the real size, and I won't guess one.", tip: "A rough range is fine. If you don't know a number, say what changed because of it." });
+    questions.push({ id: `probe-scale-${hash(line)}`, probe: true, priority: "From your own words", topic: `Scale: ${clip(line, 32)}`, prompt: `You wrote “${clip(line)}”. How big was that: people, budget, volume, time, or customers affected?`, why: "A line with no scale reads as a duty, not a result. Only you know the real size, and I won't guess one.", tip: "A rough range is fine. If you don't know a number, say what changed because of it." });
   }
   for (const item of repeatedPhrases(sources, isCareer)) {
     questions.push({ id: `probe-repeat-${hash(item.phrase)}`, probe: true, priority: "From your own words", topic: `“${item.phrase}”`, prompt: `“${item.phrase}” comes up ${item.total} times across your documents. What is it exactly, and what changed because of it?`, why: "Something you keep returning to is probably central, and may be undersold on the resume.", tip: "Name what it was, your part in it, and the result, even a qualitative one." });
@@ -90,7 +90,7 @@ export function probeQuestions(sources, isCareer = defaultIsCareer, now) {
   if (shape.gaps[0]) questions.push({ id: `probe-gap-${shape.gaps[0].from}-${shape.gaps[0].to}`, probe: true, priority: "From your own words", topic: "Dates on your resume", prompt: `Your resume shows nothing between ${shape.gaps[0].from} and ${shape.gaps[0].to}. What were you doing, and do you want the resume to say so?`, why: "Readers notice gaps. A short honest line usually costs less than the question it invites.", tip: "Caregiving, study, health, a venture, a layoff: all legitimate. Say only what you're comfortable putting on the page." });
   else if (shape.overlaps[0]) { const [a, b] = shape.overlaps[0]; questions.push({ id: `probe-overlap-${hash(a.label + b.label)}`, probe: true, priority: "From your own words", topic: "Overlapping roles", prompt: `“${clip(a.label, 50)}” and “${clip(b.label, 50)}” overlap in time. Were they at the same time, or is one a different arrangement, such as consulting, a board seat or part-time?`, why: "Overlapping dates look like a mistake unless the arrangement is stated.", tip: "Say what each one was and roughly how much of your time it took." }); }
   else if (shape.shortStints >= 3) questions.push({ id: "probe-short-stints", probe: true, priority: "From your own words", topic: "Short roles", prompt: "Several roles on your resume lasted a year or less. What was the pattern: contracts, restructurings, or something else?", why: "A pattern you explain reads as a choice. One you don't reads as a risk.", tip: "One sentence on the pattern is enough, and it may belong in the resume or only in the interview." });
-  return questions.slice(0, 3);
+  return questions.slice(0, max);
 }
 
 // Same rule analyze.js uses; duplicated as a default only so this module can be

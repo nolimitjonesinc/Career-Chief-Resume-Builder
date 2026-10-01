@@ -70,11 +70,12 @@ export const themes = [
 
 // The sentence that best shows a theme: a real sentence beats a bare title, and
 // among those the one that matches most.
+const clipAtWord = (text, n) => (text.length <= n ? text : `${text.slice(0, n).replace(/\s+\S*$/, "")}…`);
 const sentenceAround = (text, pattern) => {
   const global = new RegExp(pattern.source, "g");
   const matching = String(text).split(/(?<=[.!?])\s+|\n+/).map((line) => line.trim()).filter((line) => line && pattern.test(line.toLowerCase()));
   const best = matching.map((line) => ({ line, score: (line.toLowerCase().match(global) || []).length + (line.length >= 30 ? 10 : 0) })).sort((x, y) => y.score - x.score)[0];
-  return best ? best.line.slice(0, 180) : "";
+  return best ? clipAtWord(best.line, 180) : "";
 };
 
 // Which role priorities does this material support, how strongly, and where is
@@ -91,8 +92,8 @@ export function evaluateRequirements(jobText, careerText) {
 
 // Coverage as the interview goes on: documents plus the answers approved so far.
 export function coverageFor(sources, answerTexts = []) {
-  const role = sources.filter(isRoleSource).map((source) => source.text).join(" ");
-  const career = [...sources.filter(isCareerSource).map((source) => source.text), ...answerTexts].join(" ");
+  const role = sources.filter(isRoleSource).map((source) => source.text).join("\n");
+  const career = [...sources.filter(isCareerSource).map((source) => source.text), ...answerTexts].join("\n");
   return evaluateRequirements(role, career);
 }
 
@@ -164,12 +165,12 @@ function questionPlan(allText, role, isSample) {
 export function analyzeSources(sources, meta) {
   const allText = sources.map((source) => source.text).join("\n");
   const resumeText = sources.find((source) => source.kind === "resume")?.text || "";
-  const careerText = sources.filter(isCareerSource).map((source) => source.text).join(" ");
-  const jobText = sources.filter(isRoleSource).map((source) => source.text).join(" ");
+  const careerText = sources.filter(isCareerSource).map((source) => source.text).join("\n");
+  const jobText = sources.filter(isRoleSource).map((source) => source.text).join("\n");
   const requirements = evaluateRequirements(jobText, careerText);
   const isSample = sources.some((source) => source.id === "sample-job");
   const baseQuestions = questionPlan(allText, meta.role, isSample);
-  const questions = [...baseQuestions.slice(0, 1), ...deckQuestions(sources), ...probeQuestions(sources, isCareerSource), ...baseQuestions.slice(1)];
+  const questions = [...baseQuestions.slice(0, 1), ...deckQuestions(sources), ...probeQuestions(sources, isCareerSource, undefined, isSample ? 1 : 3), ...baseQuestions.slice(1)];
   const known = requirements.filter((item) => item.supported).map((item) => item.label);
   const gaps = requirements.filter((item) => !item.supported).map((item) => item.label);
   const research = sources.filter(isResearchSource).map((source) => ({
@@ -212,6 +213,6 @@ export function proposeResumeUpdate(doc, question, answer) {
 // proposal function, so it can only ever show what the app actually does.
 export function sampleTransformation() {
   const question = questionPlan("", "", true)[0];
-  const said = sampleResume.split("\n").find((line) => /partnerships/i.test(line)) || "";
+  const said = sampleResume.split(/(?<=[.!?])\s+|\n+/).find((line) => /partnerships/i.test(line)) || "";
   return { said, asked: question.prompt, answer: question.sample, became: proposeResumeUpdate({}, question, question.sample) };
 }
