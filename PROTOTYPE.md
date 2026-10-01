@@ -21,6 +21,10 @@ When a server-side `OPENAI_API_KEY` is configured, the intake offers an explicit
 
 Without a configured key, the app transparently uses its deterministic source analyzer and never calls the AI endpoint with candidate text. The working draft and exports still function. The deployed demo currently has no AI key and therefore runs in this fallback mode.
 
+## Added on `feature/trust-and-evidence` (Oct 1, 2026)
+
+Evidence ledger (where each resume line came from, informational only), live role coverage with quoted proof, interview questions built from the candidate's own lines and dates (no AI needed), 22 requirement themes instead of nine, a Compare jobs tab, a "why this wording" explainer under every proposal, an AI-only "ask for a change" box with a figure check, an export parse check that reads the real Word file back, a homepage before/after built from the real sample, and a server safety layer (master switch, origin check, rate and daily limits, response cap, narrowed SSRF). See `PROJECT.md` sections 5, 6 and 8 for what each does and where it stops.
+
 ## What is genuinely functional
 
 - Local client-side text extraction for PDF, DOCX, HTML, TXT, Markdown, and RTF files.
@@ -49,4 +53,4 @@ Connect a server-held API key to exercise live AI research. Then add secure acco
 
 ## Validation
 
-Run `npm run build`, `npm run test:sites`, and `node --test tests/career-ai.test.mjs`. The AI tests use a controlled response and check the no-key boundary, cited-research filter, and answer-dependent follow-up. The earlier browser checks covered PDF/DOCX/HTML ingestion, combined analysis, the seven-question plan, proposal review, direct editing, Finish Now, and all four export formats. New browser-local persistence and dynamic company switching require a final interface check after deployment.
+Run `npm run build`, then `npm test` (62 tests across nine files; `npm run test:sites` runs just the hosting tests). The AI tests use a controlled response and check the no-key boundary, cited-research filter, and answer-dependent follow-up. The earlier browser checks covered PDF/DOCX/HTML ingestion, combined analysis, the seven-question plan, proposal review, direct editing, Finish Now, and all four export formats. New browser-local persistence and dynamic company switching require a final interface check after deployment.

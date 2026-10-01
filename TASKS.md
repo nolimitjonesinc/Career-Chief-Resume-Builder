@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** September 29, 2026
+**Last updated:** October 1, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -9,21 +9,24 @@ Everything below comes from the documented gaps in `PROJECT.md` section 8 and th
 production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 
 ## Next up
-- [ ] **Before a key touches any environment, local included:** lock down the AI research endpoint — spend cap, rate limit, and a check on who is calling it. Currently open to anyone who can reach the app, and each analysis makes several calls including web search. Breaks the standing "cap spend before launch" rule
-- [ ] **Decide the dev-server binding:** it currently answers the whole local network with the AI route exposed, so a key in the environment is spendable by anyone on the same wifi. Either refuse AI calls that did not originate on this machine, or bind locally by default — the wide binding looks intentional, so it is a choice to make, not a quiet edit
-- [ ] Cap the size of the AI response before parsing it, matching what the link reader already does
-- [ ] **Before any public deploy:** close the SSRF hole in the public-page reader — verify where a hostname actually resolves rather than pattern-matching its name, re-validate every redirect hop, and gate outbound requests on the Worker side
-- [ ] First live run of the AI path against a real account — it has only ever run against a controlled fake response
+- [ ] **Review and test branch `feature/trust-and-evidence`** (see `PLAN.md`, `IMPROVEMENTS.md`), then merge or send back notes. Rules 15 and 16 in `PROJECT.md` are proposed there and marked ‹CHECK›
+- [ ] **Before a key touches a public URL:** bind a shared store as `env.AI_LIMIT_STORE` (Workers KV or a Durable Object) so the daily cap is a real cap. The interface exists; no adapter is written
+- [ ] **First live run of the AI path** against a real account, behind the limits. Record the real cost of one plan and one answer check, then replace the estimated unit costs in `shared/config.mjs`. Judge whether the AI-mode questions are actually good: the "we know what to ask" pitch depends on it
+- [ ] Verify the link reader's SSRF handling on the real Worker runtime (private-address refusal, DoH reachability) and decide whether a third-party resolver is acceptable
 - [ ] Hands-on interface check of browser-local autosave and switching between company applications
-- [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser
+- [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser. Prerequisite for any paid tier or recurring product
+- [ ] Payments and a free/paid boundary (free: interview and preview; paid: complete resume and tailoring). Needs accounts first. Pricing numbers from outside reviews were guesses; set them after real cost per plan is known
 - [ ] **Cover letter** as a second finished document, built from approved answers plus sources aimed at "my future cover letter"
 - [ ] Draft resume lines straight from a deck (user approves each) instead of only through the interview
 - [ ] Prepared interview stories to finish the application package (draft screening answers already exist)
+- [ ] Get 10–20 real people through it and collect before/after examples and testimonials (blocked on the items above)
 
 ## Doing now
 - [ ] Nothing in flight
 
 ## Done
+- [x] Safety layer: one `AI_ENABLED` gate for every runtime, origin check, per-caller and daily limits, response size cap, dev-server AI routes loopback-only, SSRF narrowed (feature branch, Oct 1, 2026)
+- [x] Evidence ledger, live role coverage, own-words interview questions, 22 themes, Compare jobs, parse check, why-this-wording, optional AI "ask for a change", homepage before/after, saved-draft versioning (feature branch, Oct 1, 2026)
 - [x] "Start new" button: new job keeping everything, or erase and start fresh; the first-screen clear link now confirms first (Sep 29, 2026)
 - [x] Read PowerPoint decks (slides, speaker notes, tables, chart numbers) and let every source be aimed at current role / past / target role / cover letter; one interview question per deck (Sep 29, 2026)
 - [x] Connect real AI research and an adaptive interview — opt-in, server-held key, cited findings only (Sep 17, 2026)
@@ -34,7 +37,10 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 
 ## Someday / maybe
 Ideas that aren't committed.
-- Claim-level citations tracing each resume line back to its source
+- Better claim tracing (the ledger is approximate word overlap); AI-assisted matching
+- Rank own-words questions by importance (recency, seniority) rather than by simple rules
+- Real spend accounting from provider usage data instead of estimated units
+- Shorter tab labels on phones (the fourth and fifth tabs sit behind a scroll)
 - Production document parser: OCR, scanned PDFs, columns, tables, tracked changes
 - Template-aware export that respects an uploaded resume's original layout
 - Version history and protected-edit trail
