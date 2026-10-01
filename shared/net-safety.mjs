@@ -62,26 +62,32 @@ export function isPrivateIPv6(ip) {
 export const isPrivateIp = (ip) => (ip.includes(":") ? isPrivateIPv6(ip) : isPrivateIPv4(ip));
 
 // Default resolver: DNS-over-HTTPS, so it works the same on Node and on Workers
-// (neither exposes a portable DNS API). Returns every A and AAAA address.
+// (neither exposes a portable DNS API). Two providers share one JSON format; the
+// second is tried only if the first returns nothing. Returns every A and AAAA address.
+const DOH = [(host, type) => `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, (host, type) => `https://dns.google/resolve?name=${encodeURIComponent(host)}&type=${type}`];
+
 export async function resolveViaDoh(host, fetchImpl = fetch) {
-  const ask = async (type) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    try {
-      const response = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, { headers: { accept: "application/dns-json" }, signal: controller.signal });
-      if (!response.ok) return [];
-      const body = await response.json();
-      return (body.Answer || []).filter((row) => row.type === (type === "A" ? 1 : 28)).map((row) => row.data);
-    } catch { return []; }
-    finally { clearTimeout(timer); }
-  };
-  const [v4, v6] = await Promise.all([ask("A"), ask("AAAA")]);
-  return [...v4, ...v6];
+  for (const endpoint of DOH) {
+    const ask = async (type) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const response = await fetchImpl(endpoint(host, type), { headers: { accept: "application/dns-json" }, signal: controller.signal });
+        if (!response.ok) return [];
+        const body = await response.json();
+        return (body.Answer || []).filter((row) => row.type === (type === "A" ? 1 : 28)).map((row) => row.data);
+      } catch { return []; }
+      finally { clearTimeout(timer); }
+    };
+    const [v4, v6] = await Promise.all([ask("A"), ask("AAAA")]);
+    if (v4.length || v6.length) return [...v4, ...v6];
+  }
+  return [];
 }
 
 // Throws unless every address the host resolves to is public.
 export async function assertHostResolvesPublic(host, resolve = resolveViaDoh) {
   const addresses = await resolve(host);
-  if (!addresses?.length) throw new Error("That address could not be looked up.");
+  if (!addresses?.length) throw new Error("The link checker could not verify that address right now. Paste the page text instead.");
   if (addresses.some(isPrivateIp)) throw new Error("That address is not a public website.");
 }

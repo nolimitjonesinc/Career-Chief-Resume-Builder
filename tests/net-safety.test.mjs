@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPrivateIp } from "../shared/net-safety.mjs";
+import { isPrivateIp, resolveViaDoh } from "../shared/net-safety.mjs";
 import { extractPublicUrl } from "../shared/url-extract.mjs";
 
 test("private, loopback, link-local and metadata addresses are blocked", () => {
@@ -60,4 +60,20 @@ test("a huge page is truncated, not buffered whole", async () => {
   const big = async () => new Response("<html><title>t</title><body>" + "word ".repeat(600_000) + "</body></html>", { headers: { "content-type": "text/html" } });
   const result = await extractPublicUrl("https://big.example/", big, { resolve: async () => ["93.184.216.34"] });
   assert.ok(result.text.length <= 50_000);
+});
+
+test("the DNS lookup falls back to a second provider and returns every address", async () => {
+  const asked = [];
+  const fetcher = async (url) => {
+    asked.push(new URL(url).host);
+    if (url.includes("cloudflare")) throw new TypeError("unreachable");
+    const type = new URL(url).searchParams.get("type");
+    return Response.json({ Answer: type === "A" ? [{ type: 1, data: "93.184.216.34" }, { type: 5, data: "alias.example." }] : [{ type: 28, data: "2606:2800:220:1::1" }] });
+  };
+  assert.deepEqual(await resolveViaDoh("a.example", fetcher), ["93.184.216.34", "2606:2800:220:1::1"]);
+  assert.ok(asked.includes("cloudflare-dns.com") && asked.includes("dns.google"));
+});
+
+test("when no provider answers, the reader fails closed with a message that says what to do", async () => {
+  await assert.rejects(extractPublicUrl("https://a.example/", async () => new Response("x"), { resolve: async () => [] }), /Paste the page text instead/);
 });
