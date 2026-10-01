@@ -9,7 +9,7 @@ export default {
       if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
       try {
         const { url } = await request.json();
-        const result = await extractPublicUrl(url, env.URL_FETCH || fetch);
+        const result = await extractPublicUrl(url, env.URL_FETCH || fetch, { resolve: env.URL_RESOLVE });
         return Response.json(result);
       } catch (error) {
         return Response.json({ error: error.message || "The link could not be read." }, { status: 422 });

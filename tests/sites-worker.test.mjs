@@ -69,6 +69,7 @@ test("extracts readable text from a public link", async () => {
       body: JSON.stringify({ url: "https://company.example/jobs/role" }),
     }),
     {
+      URL_RESOLVE: async () => ["93.184.216.34"],
       URL_FETCH: async () => new Response("<html><title>Role brief</title><body>" + "Meaningful role information. ".repeat(8) + "</body></html>", {
         headers: { "content-type": "text/html" },
       }),

@@ -1,7 +1,8 @@
 import { handleCareerAI } from "../../shared/career-ai.mjs";
+import { aiEnvFrom } from "../../shared/ai-guard.mjs";
 
 export default {
   fetch(request) {
-    return handleCareerAI(request, { OPENAI_API_KEY: process.env.AI_ENABLED === "true" ? process.env.OPENAI_API_KEY : undefined });
+    return handleCareerAI(request, aiEnvFrom(process.env));
   },
 };
