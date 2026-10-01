@@ -66,3 +66,14 @@ Declined, with reasons:
 - *Shared "unknown" bucket when no IP header exists.* Real, but both runtimes we deploy to always send one; local dev is a single user. Left, noted.
 - *Plan retry on the fallback model costs two paid calls for 10 units.* Real; unit costs are estimates anyway and need measuring on the first live run.
 - *Atomicity of a real KV store.* Already documented as the reason the default is a soft cap.
+
+## Guided tour prototype (`proto/guided-journey`)
+
+| Function | Done | Left, and why |
+|---|---|---|
+| `Tour` | Stops on any real input. Replay chip persists while the intake screen is up. Numbered badges were built, then **removed** after the browser pass showed they collided with the page's own 1-2-3 list; the tour now lights that list instead. A bug the behaviour test caught: typing one character unmounted the whole tour, so the replay chip vanished; autoplay and presence are now separate. | On a phone the hero and example sit above the form, and the tour scrolls past them within a second. Consider starting with the example on phones. |
+| `connector` (arrow) | Drawn only when both stops are on screen; viewport-fixed so sticky columns don't misalign it. Arrowhead fades in as the line lands. | Skipped silently when the stops are far apart (common on desktop between "Analyze" and the left column's example). |
+| Reduced motion | No autoplay, no arrows, no pulse; a manual chip plays a static version. | No screen-reader announcement of the *highlighted field*, only the caption (it is a live region). Needs a real screen-reader pass. |
+| Step list sync | One route map, not two. | At the example stop, the list can be scrolled out of view above it; scroll so both show. |
+| Disabled Analyze button | Ring still shows. | Disabled buttons fade their ring too; a tiny cosmetic gap. |
+| Worth doing? | Looks like a product, not an ad: one color, one ring, one line, one caption. | **Unmeasured.** The only honest test is a handful of real people: do they start sooner, or bounce? Add a one-line event for "tour started / skipped / sample clicked" before deciding. |
