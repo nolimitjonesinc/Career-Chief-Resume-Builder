@@ -65,7 +65,7 @@ test("extracts readable text from a public link", async () => {
   const response = await worker.fetch(
     new Request("https://example.test/api/extract-url", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: "https://example.test" },
       body: JSON.stringify({ url: "https://company.example/jobs/role" }),
     }),
     {
@@ -79,6 +79,16 @@ test("extracts readable text from a public link", async () => {
   const body = await response.json();
   assert.equal(body.title, "Role brief");
   assert.match(body.text, /Meaningful role information/);
+});
+
+test("the link reader refuses callers that are not our own pages", async () => {
+  let fetched = false;
+  const response = await worker.fetch(
+    new Request("https://example.test/api/extract-url", { method: "POST", headers: { "content-type": "application/json", origin: "https://evil.example" }, body: JSON.stringify({ url: "https://company.example/jobs/role" }) }),
+    { URL_RESOLVE: async () => ["93.184.216.34"], URL_FETCH: async () => { fetched = true; return new Response("x"); } },
+  );
+  assert.equal(response.status, 403);
+  assert.equal(fetched, false);
 });
 
 test("emits the files required by Sites packaging", async () => {

@@ -51,7 +51,7 @@ export const themes = [
   keyed("acquisition", "Customer acquisition", /acquisition|customer adoption|prospective customer/),
   keyed("growth", "Measurable growth", /growth|increase|improved|expanded/),
   keyed("trust", "Audience trust", /trust|sensitive customer|credibility/),
-  keyed("team", "Team leadership", /team|direct reports|people manager|managed [a-z -]*staff/),
+  keyed("team", "Team leadership", /team|direct reports|people manager|managed (?:[a-z]+ ){0,4}staff/),
   keyed("strategy", "Brand strategy", /strategy|positioning/),
   { key: "analytics", label: "Analytics & measurement", job: /analytic|data[- ]driven|metrics|\bkpis?\b|measure|dashboard|a\/b test|insights/, support: /analytic|metric|kpi|measur|dashboard|\bdata\b|a\/b|insight/ },
   { key: "product", label: "Product & roadmap", job: /product (strategy|management|roadmap|manager)|roadmap|product-led|go-to-market|\bgtm\b/, support: /product|roadmap|launch|go-to-market|\bgtm\b|feature/ },
@@ -83,7 +83,8 @@ const sentenceAround = (text, pattern) => {
 // view after each answer, and the side-by-side job comparison.
 export function evaluateRequirements(jobText, careerText) {
   const job = String(jobText || "").toLowerCase();
-  const career = String(careerText || "").toLowerCase();
+  // Capped so a pathological paste can't stall the page on every keystroke.
+  const career = String(careerText || "").slice(0, 300_000).toLowerCase();
   return themes.filter((theme) => theme.job.test(job)).map((theme) => {
     const hits = (career.match(new RegExp(theme.support.source, "g")) || []).length;
     return { key: theme.key, label: theme.label, supported: hits > 0, strength: hits >= 2 ? "solid" : hits === 1 ? "thin" : "none", evidence: hits ? sentenceAround(careerText, theme.support) : "" };

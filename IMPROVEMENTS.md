@@ -46,3 +46,23 @@ Asked after every function, before moving on. **Done** = changed in the same pas
 ## Process
 - Found 6 defects only by driving the real app, not by unit tests. A browser pass belongs in every change that touches UI.
 - The AI path has now run end to end (against a fake provider). It has not run on a real account. Do not read "works" as "good".
+
+## Independent adversarial review (a second agent, fresh eyes) and what I did with it
+
+Checked each claim before acting. Fixed:
+- **Wrong corpus (high).** The ledger and the why-box checked figures and "from your documents" against *every* source, including the job post and company research, so "10+ years" in the posting would excuse "10 years" on the resume. Now: the user's own material only.
+- **Number blind spots (high).** "Reached 2000 customers" was ignored as a year; "sixteen", "ninety percent", "a million", "forty-two" were missed or mangled; "$2000" matched "2000 employees"; "40 percent" never matched "40%"; "3×" and full-width digits were ignored; "5,10,15" became one number; "web3" and "Since 2021," false-alarmed. Rewritten as one unit-aware pass over typed tokens. 9 tests.
+- **Revise race (medium).** An AI rewrite could overwrite what the user typed while it ran, or land on the next question's proposal. Now discarded if the wording or question changed.
+- **Hostile bodies (medium).** A string where a list belonged spent budget, called the model once, then leaked a JS error message. Types are now validated before anything is spent; internals are never echoed; the body is size-capped while read.
+- **IPv6 gaps (medium).** 6to4, Teredo, NAT64 local-use, IPv4-compatible, site-local, discard and 192.88.99/24 were all "public". IPv6 is now allow-listed (2000::/3 only) with embedded-IPv4 checks. `localhost.` is checked as `localhost`.
+- **DNS fail-open (medium).** One address family failing counted as "no addresses", so an attacker-run name server could answer SERVFAIL to us and a private A record to everyone else. A half-answer is now unverified.
+- **Link reader open to anyone (low).** `/api/extract-url` had no origin check. Added. Redirect bodies are cancelled.
+- **Draft robustness (low).** A tampered version number could blank the page at import; a draft from a newer build was silently overwritten. Both fixed; a newer draft is left alone and the user is told.
+- **ReDoS (low, pre-existing).** `managed [a-z -]*staff` took 4.8 s on 240 KB; replaced and input capped.
+- **Consent persisted across reloads** (pre-existing, broke Rule 8 "per session"). No longer restored.
+
+Declined, with reasons:
+- *"Server `unsupportedNumbers` is never read by the client."* True, deliberate: the page's own check is stricter about the right thing (it knows the documents) and the server field is defense in depth for non-browser callers. Documented, not merged, because two lists with different corpora would contradict each other on screen.
+- *Shared "unknown" bucket when no IP header exists.* Real, but both runtimes we deploy to always send one; local dev is a single user. Left, noted.
+- *Plan retry on the fallback model costs two paid calls for 10 units.* Real; unit costs are estimates anyway and need measuring on the first live run.
+- *Atomicity of a real KV store.* Already documented as the reason the default is a soft cap.

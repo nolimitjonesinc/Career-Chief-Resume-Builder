@@ -6,7 +6,8 @@ const MAX_HOPS = 5;
 
 function isPublicHttps(raw) {
   const url = new URL(raw);
-  const host = url.hostname.toLowerCase();
+  // A trailing dot ("localhost.") names the same host; check the name without it.
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (url.protocol !== "https:") throw new Error("Use a public HTTPS link.");
   if (url.username || url.password) throw new Error("Links with a username or password are not supported.");
   if (url.port && url.port !== "443") throw new Error("Only standard HTTPS links are supported.");
@@ -50,6 +51,7 @@ async function fetchPublic(startUrl, fetchImpl, resolve, signal) {
     await assertHostResolvesPublic(url.hostname, resolve);
     const response = await fetchImpl(url, { redirect: "manual", signal, headers: { "user-agent": "CareerChiefPrototype/1.0" } });
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
+      await response.body?.cancel?.().catch?.(() => {});
       url = isPublicHttps(new URL(response.headers.get("location"), url).href);
       continue;
     }

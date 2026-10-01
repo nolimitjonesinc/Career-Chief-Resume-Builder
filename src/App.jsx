@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react";
 import { acceptedFiles, extractFile, extractUrl } from "./lib/ingest";
 import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource, proposeResumeUpdate, sampleSources, sourceLabels } from "./lib/analyze";
-import { DRAFT_VERSION, migrateDraft, storageKey } from "./lib/draft";
+import { DRAFT_VERSION, isNewerDraft, migrateDraft, storageKey } from "./lib/draft";
 import { buildLedger } from "./lib/evidence";
 import { compareJobs } from "./lib/compare";
 import { EvidenceLedger, LedgerButton } from "./components/Ledger";
@@ -26,7 +26,10 @@ const fileOrigin = (file, extracted) => [`${file.name.split(".").pop().toUpperCa
 const fileFormat = (file) => file.name.toLowerCase().endsWith(".pptx") ? "pptx" : undefined;
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 function readDraft() { try { return JSON.parse(localStorage.getItem(storageKey) || "null"); } catch { return null; } }
-const initialDraft = migrateDraft(readDraft());
+const rawDraft = readDraft();
+const initialDraft = migrateDraft(rawDraft);
+// A draft saved by a newer build is left alone: this session works in memory only.
+const savedByNewer = isNewerDraft(rawDraft);
 
 export function App() {
   const [screen, setScreen] = useState(initialDraft?.screen || "intake");
@@ -50,14 +53,15 @@ export function App() {
   const [sourceDraft, setSourceDraft] = useState({ ...blankSource });
   const [selectedSource, setSelectedSource] = useState(null);
   const [busy, setBusy] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(savedByNewer ? "A newer version of Career Chief saved the draft in this browser, so this session will not overwrite it. Changes here are not saved." : "");
   const [manualEdit, setManualEdit] = useState(initialDraft?.manualEdit || false);
   const [projectName, setProjectName] = useState(initialDraft?.projectName || "primary");
   const [savedProjects, setSavedProjects] = useState(initialDraft?.savedProjects || {});
   const [careerBank, setCareerBank] = useState(initialDraft?.careerBank || []);
   const [newOpportunity, setNewOpportunity] = useState({ company: "", role: "", job: "" });
   const [aiEnabled, setAiEnabled] = useState(false);
-  const [aiConsent, setAiConsent] = useState(initialDraft?.aiConsent || false);
+  // Consent is per session (Rule 8): it is deliberately not restored from the saved draft.
+  const [aiConsent, setAiConsent] = useState(false);
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [compareList, setCompareList] = useState(initialDraft?.compareJobs || []);
   const dialog = useRef(null);
@@ -65,9 +69,10 @@ export function App() {
 
   useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => setAiEnabled(Boolean(value.enabled))).catch(() => {}); }, []);
   useEffect(() => {
-    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, aiConsent, compareJobs: compareList, draftVersion: DRAFT_VERSION })); }
+    if (savedByNewer) return;
+    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, draftVersion: DRAFT_VERSION })); }
     catch { /* Browser storage may be unavailable or full; the current session still works. */ }
-  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, aiConsent, compareList]);
+  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareList]);
 
   const currentQuestion = questions[questionIndex];
   const completed = Object.values(questionStatus).filter((value) => value === "answered").length;
@@ -94,9 +99,13 @@ export function App() {
 
   const answerTexts = useMemo(() => [...new Set([...answers.map((item) => item.text), ...careerBank.map((item) => item.text)])], [answers, careerBank]);
   const coverage = useMemo(() => (analysis ? coverageFor(intakeSources, answerTexts) : []), [analysis, intakeSources, answerTexts]);
-  const ledger = useMemo(() => (doc ? buildLedger(doc, { answers, sources: intakeSources, baseline: analysis?.doc }) : null), [doc, answers, intakeSources, analysis]);
+  // The user's OWN material: not the job post, application questions, company
+  // research or leadership interviews. A figure or a sentence from those is not
+  // something the user supplied about themselves.
+  const careerSources = useMemo(() => [...intakeSources.filter(isCareerSource), ...careerBank.map((item) => ({ id: `bank-${item.id}`, kind: "current", name: `Earlier answer: ${item.topic}`, text: item.text }))], [intakeSources, careerBank]);
+  const ledger = useMemo(() => (doc ? buildLedger(doc, { answers, sources: careerSources, baseline: analysis?.doc }) : null), [doc, answers, careerSources, analysis]);
   const comparison = useMemo(() => compareJobs(intakeSources, answerTexts, compareList), [intakeSources, answerTexts, compareList]);
-  const proposalSupports = useMemo(() => [...intakeSources.map((item) => item.text), ...answerTexts, answer], [intakeSources, answerTexts, answer]);
+  const proposalSupports = useMemo(() => [...careerSources.map((item) => item.text), ...answerTexts, answer], [careerSources, answerTexts, answer]);
   const currentJob = useMemo(() => ({ title: meta.role, text: intakeSources.filter(isRoleSource).map((item) => item.text).join("\n").slice(0, 6000) }), [intakeSources, meta.role]);
 
   function loadSample() {
@@ -255,13 +264,22 @@ export function App() {
     setModal("proposal");
   }
 
+  // Latest proposal state, read after an await to detect that the user moved on.
+  const live = useRef({});
+  live.current = { proposal, qid: currentQuestion?.id, modal };
+
   // Optional AI rewrite of the proposed line. Returns a message for the dialog,
   // because the page banners sit behind the open dialog.
   async function reviseProposal(instruction) {
+    const snap = live.current;
     try {
       const response = await fetch("/api/ai/revise", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, answer, priorAnswers: answers.map((item) => ({ text: item.text })), current: proposal, instruction }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "That change could not be made.");
+      const now = live.current;
+      // The user kept typing, or moved to another question, while this ran:
+      // their wording wins (Rule 4).
+      if (now.qid !== snap.qid || now.modal !== "proposal" || now.proposal !== snap.proposal) return "You changed the wording while that was running, so your version was kept.";
       setProposal(result.proposal);
       return result.note ? `Revised. ${result.note}` : "Revised. Check it before you approve.";
     } catch (error) { return `${error.message} Your wording is unchanged.`; }

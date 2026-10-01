@@ -4,7 +4,7 @@ import { isPrivateIp, resolveViaDoh } from "../shared/net-safety.mjs";
 import { extractPublicUrl } from "../shared/url-extract.mjs";
 
 test("private, loopback, link-local and metadata addresses are blocked", () => {
-  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:7f00:1", "64:ff9b::a00:1", "2001:db8::1"]) assert.equal(isPrivateIp(ip), true, ip);
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:7f00:1", "64:ff9b::a00:1", "2001:db8::1", "2002:a9fe:a9fe::1", "2002:7f00:1::", "2001::1", "64:ff9b:1::1", "::7f00:1", "::10.0.0.1", "::ffff:0:10.0.0.1", "fec0::1", "100::1", "192.88.99.1"]) assert.equal(isPrivateIp(ip), true, ip);
 });
 
 test("ordinary public addresses pass", () => {
@@ -68,7 +68,7 @@ test("the DNS lookup falls back to a second provider and returns every address",
     asked.push(new URL(url).host);
     if (url.includes("cloudflare")) throw new TypeError("unreachable");
     const type = new URL(url).searchParams.get("type");
-    return Response.json({ Answer: type === "A" ? [{ type: 1, data: "93.184.216.34" }, { type: 5, data: "alias.example." }] : [{ type: 28, data: "2606:2800:220:1::1" }] });
+    return Response.json({ Status: 0, Answer: type === "A" ? [{ type: 1, data: "93.184.216.34" }, { type: 5, data: "alias.example." }] : [{ type: 28, data: "2606:2800:220:1::1" }] });
   };
   assert.deepEqual(await resolveViaDoh("a.example", fetcher), ["93.184.216.34", "2606:2800:220:1::1"]);
   assert.ok(asked.includes("cloudflare-dns.com") && asked.includes("dns.google"));
@@ -76,4 +76,22 @@ test("the DNS lookup falls back to a second provider and returns every address",
 
 test("when no provider answers, the reader fails closed with a message that says what to do", async () => {
   await assert.rejects(extractPublicUrl("https://a.example/", async () => new Response("x"), { resolve: async () => [] }), /Paste the page text instead/);
+});
+
+test("a half-answered lookup is unverified: if one address family errors, the host is not trusted", async () => {
+  const fetcher = async (url) => {
+    const type = new URL(url).searchParams.get("type");
+    return type === "A" ? Response.json({ Status: 2 }) : Response.json({ Status: 0, Answer: [{ type: 28, data: "2606:2800:220:1::1" }] });
+  };
+  assert.deepEqual(await resolveViaDoh("a.example", fetcher), []);
+});
+
+test("a host with no AAAA record but a good A record is fine", async () => {
+  const fetcher = async (url) => (new URL(url).searchParams.get("type") === "A" ? Response.json({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] }) : Response.json({ Status: 0 }));
+  assert.deepEqual(await resolveViaDoh("a.example", fetcher), ["93.184.216.34"]);
+});
+
+test("trailing-dot hostnames are checked as their real names", async () => {
+  const resolve = async () => ["93.184.216.34"];
+  for (const url of ["https://localhost./", "https://printer.local./"]) await assert.rejects(extractPublicUrl(url, async () => page(), { resolve }), undefined, url);
 });

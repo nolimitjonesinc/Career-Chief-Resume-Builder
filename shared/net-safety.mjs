@@ -17,7 +17,7 @@ const inRange = (parts, [a, b, c], bits) => {
 const BLOCKED_V4 = [
   [[0, 0, 0], 8], [[10, 0, 0], 8], [[100, 64, 0], 10], [[127, 0, 0], 8], [[169, 254, 0], 16],
   [[172, 16, 0], 12], [[192, 0, 0], 24], [[192, 0, 2], 24], [[192, 168, 0], 16], [[198, 18, 0], 15],
-  [[198, 51, 100], 24], [[203, 0, 113], 24], [[224, 0, 0], 4], [[240, 0, 0], 4],
+  [[192, 88, 99], 24], [[198, 51, 100], 24], [[203, 0, 113], 24], [[224, 0, 0], 4], [[240, 0, 0], 4],
 ];
 
 export function isPrivateIPv4(ip) {
@@ -45,16 +45,19 @@ function ipv6Groups(ip) {
   return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null;
 }
 
+// Only global unicast (2000::/3) can be a public website, and even inside it a
+// few ranges embed or tunnel an IPv4 address or are reserved. Everything else
+// (loopback, unspecified, unique-local, link-local, site-local, multicast,
+// IPv4-compatible, discard) is refused by default rather than listed one by one.
 export function isPrivateIPv6(ip) {
   const g = ipv6Groups(ip);
   if (!g) return true;
-  const embeddedV4 = `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
-  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return isPrivateIPv4(embeddedV4); // ::ffff:a.b.c.d
-  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isPrivateIPv4(embeddedV4); // NAT64
-  if (g.slice(0, 7).every((x) => x === 0)) return true; // :: and ::1
-  if ((g[0] & 0xfe00) === 0xfc00) return true; // unique local fc00::/7
-  if ((g[0] & 0xffc0) === 0xfe80) return true; // link local
-  if ((g[0] & 0xff00) === 0xff00) return true; // multicast
+  const v4 = (hi, lo) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return isPrivateIPv4(v4(g[6], g[7])); // ::ffff:a.b.c.d (mapped)
+  if (g[0] === 0x64 && g[1] === 0xff9b) return g.slice(2, 6).every((x) => x === 0) ? isPrivateIPv4(v4(g[6], g[7])) : true; // NAT64; 64:ff9b:1::/48 local-use
+  if ((g[0] & 0xe000) !== 0x2000) return true; // outside 2000::/3
+  if (g[0] === 0x2002) return isPrivateIPv4(v4(g[1], g[2])); // 6to4 embeds an IPv4 address
+  if (g[0] === 0x2001 && g[1] === 0x0000) return true; // Teredo
   if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // documentation
   return false;
 }
@@ -62,8 +65,11 @@ export function isPrivateIPv6(ip) {
 export const isPrivateIp = (ip) => (ip.includes(":") ? isPrivateIPv6(ip) : isPrivateIPv4(ip));
 
 // Default resolver: DNS-over-HTTPS, so it works the same on Node and on Workers
-// (neither exposes a portable DNS API). Two providers share one JSON format; the
-// second is tried only if the first returns nothing. Returns every A and AAAA address.
+// (neither exposes a portable DNS API). Two providers share one JSON format.
+// A provider's answer counts only if BOTH the A and AAAA lookups succeeded
+// (NOERROR, even with no records): if one family fails, an attacker-run name
+// server could answer us with an error and the real runtime with a private
+// address, so a half-answer is treated as unverified and the next provider is tried.
 const DOH = [(host, type) => `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=${type}`, (host, type) => `https://dns.google/resolve?name=${encodeURIComponent(host)}&type=${type}`];
 
 export async function resolveViaDoh(host, fetchImpl = fetch) {
@@ -73,14 +79,15 @@ export async function resolveViaDoh(host, fetchImpl = fetch) {
       const timer = setTimeout(() => controller.abort(), 5_000);
       try {
         const response = await fetchImpl(endpoint(host, type), { headers: { accept: "application/dns-json" }, signal: controller.signal });
-        if (!response.ok) return [];
+        if (!response.ok) return null;
         const body = await response.json();
+        if (body.Status !== 0) return null; // SERVFAIL, NXDOMAIN, refused: not a verified answer
         return (body.Answer || []).filter((row) => row.type === (type === "A" ? 1 : 28)).map((row) => row.data);
-      } catch { return []; }
+      } catch { return null; }
       finally { clearTimeout(timer); }
     };
     const [v4, v6] = await Promise.all([ask("A"), ask("AAAA")]);
-    if (v4.length || v6.length) return [...v4, ...v6];
+    if (v4 && v6 && v4.length + v6.length > 0) return [...v4, ...v6];
   }
   return [];
 }

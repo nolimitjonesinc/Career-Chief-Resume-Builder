@@ -2,6 +2,7 @@ import { aiTextLimit } from "./source-limits.mjs";
 import { aiLimits } from "./config.mjs";
 import { GuardError, aiSwitchOn, assertAllowedOrigin, costOf, readJsonLimited, spendOrThrow } from "./ai-guard.mjs";
 import { unsupportedNumbers } from "./claims.mjs";
+import { readTextLimited } from "./limited-read.mjs";
 
 const API = "https://api.openai.com/v1/responses";
 // Sized for a resume, a job post and a few trimmed decks; each source is capped
@@ -26,10 +27,18 @@ const MODELS = {
 // model rejects the tool we retry once on the model known to support it.
 const RESEARCH_FALLBACK = "gpt-5.5";
 
+const isText = (value) => typeof value === "string";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isTextList = (value) => Array.isArray(value) && value.every(isText);
+// Wrong types are rejected up front, before any budget is spent or model called.
+const BAD = "That request could not be read.";
+
 function validPayload(body) {
+  if (!isObject(body) || !Array.isArray(body.sources) || !body.sources.every((s) => isObject(s) && isText(s.kind) && isText(s.text))) throw new Error(BAD);
+  if (body.meta !== undefined && !(isObject(body.meta) && [body.meta.company, body.meta.role].every((v) => v === undefined || isText(v)))) throw new Error(BAD);
   const size = JSON.stringify(body).length;
   if (size > MAX_INPUT) throw new Error("This case has too much text for one analysis. Remove less relevant sources and try again.");
-  if (!body || !Array.isArray(body.sources) || !body.sources.some((s) => s.kind === "resume") || !body.sources.some((s) => s.kind === "job")) {
+  if (!body.sources.some((s) => s.kind === "resume") || !body.sources.some((s) => s.kind === "job")) {
     throw new Error("Add a resume and a job description before using AI research.");
   }
 }
@@ -167,13 +176,15 @@ async function revise(payload, key, fetchImpl, maxBytes) {
   return { proposal, note: String(data.note || "").slice(0, 240), unsupportedNumbers: unsupportedNumbers(proposal, supportTexts(payload)) };
 }
 
-const followUpOk = (payload) => payload?.answer?.trim() && payload?.question?.prompt && JSON.stringify(payload).length <= MAX_INPUT;
-const reviseOk = (payload) => payload?.answer?.trim() && payload?.current?.trim() && payload?.instruction?.trim() && JSON.stringify(payload).length <= MAX_INPUT;
+const priorOk = (value) => value === undefined || (Array.isArray(value) && value.every((item) => isText(item) || (isObject(item) && (item.text === undefined || isText(item.text)))));
+const common = (p) => isObject(p) && (p.role === undefined || isText(p.role)) && priorOk(p.priorAnswers) && JSON.stringify(p).length <= MAX_INPUT;
+const followUpOk = (p) => common(p) && isText(p.answer) && p.answer.trim() && isObject(p.question) && isText(p.question.prompt) && p.question.prompt && [p.askedTopics, p.pendingTopics].every((v) => v === undefined || isTextList(v));
+const reviseOk = (p) => common(p) && [p.answer, p.current, p.instruction].every((v) => isText(v) && v.trim());
 
 const routes = {
   "/api/ai/plan": { validate: (payload) => validPayload(payload), run: createPlan },
-  "/api/ai/follow-up": { validate: (payload) => { if (!followUpOk(payload)) throw new Error("A question and answer are needed."); }, run: followUp },
-  "/api/ai/revise": { validate: (payload) => { if (!reviseOk(payload)) throw new Error("Wording, an answer and a request are needed."); }, run: revise },
+  "/api/ai/follow-up": { validate: (payload) => { if (!followUpOk(payload)) throw new Error(BAD); }, run: followUp },
+  "/api/ai/revise": { validate: (payload) => { if (!reviseOk(payload)) throw new Error(BAD); }, run: revise },
 };
 
 // Point the provider at a gateway, proxy or local fake by setting OPENAI_BASE_URL
@@ -189,7 +200,11 @@ export async function handleCareerAI(request, env = {}, fetchImpl = fetch) {
   if (!aiSwitchOn(env)) return Response.json({ error: "AI research is not connected yet. The transparent prototype analysis is still available." }, { status: 503 });
   try {
     assertAllowedOrigin(request, env);
-    const raw = await request.text();
+    // Refuse by declared size first, then enforce the same cap while reading.
+    if (Number(request.headers.get("content-length") || 0) > MAX_INPUT * 4) throw new Error("Too much text was sent in one request.");
+    let raw;
+    try { raw = await readTextLimited(request, MAX_INPUT * 4, "throw"); }
+    catch (error) { throw new Error(error.message === "TOO_LARGE" ? "Too much text was sent in one request." : BAD); }
     if (raw.length > MAX_INPUT) throw new Error("Too much text was sent in one request.");
     const payload = JSON.parse(raw);
     route.validate(payload);
@@ -197,6 +212,9 @@ export async function handleCareerAI(request, env = {}, fetchImpl = fetch) {
     return Response.json(await route.run(payload, env.OPENAI_API_KEY, withBaseUrl(fetchImpl, env.OPENAI_BASE_URL), aiLimits(env).maxResponseBytes));
   } catch (error) {
     if (error instanceof GuardError) return Response.json({ error: error.message }, { status: error.status, headers: error.retryAfter ? { "retry-after": String(error.retryAfter) } : {} });
-    return Response.json({ error: error instanceof SyntaxError ? "That request could not be read." : error.message || "AI research could not complete." }, { status: 422 });
+    // Our own messages are plain Errors. A TypeError or similar is a bug or a
+    // hostile body; never echo its internals.
+    const internal = error instanceof SyntaxError || error instanceof TypeError || error instanceof RangeError || error instanceof ReferenceError;
+    return Response.json({ error: internal ? BAD : error.message || "AI research could not complete." }, { status: 422 });
   }
 }

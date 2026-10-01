@@ -9,11 +9,17 @@ const steps = {
   1: (draft) => ({ ...draft, compareJobs: draft.compareJobs || [] }),
 };
 
+// A draft written by a newer build must not be guessed at, and must not be
+// overwritten by this one either (see isNewerDraft).
+export const isNewerDraft = (draft) => Number.isInteger(draft?.draftVersion) && draft.draftVersion > DRAFT_VERSION;
+
 export function migrateDraft(draft) {
-  if (!draft || typeof draft !== "object") return null;
-  let current = { ...draft };
-  let version = Number.isInteger(current.draftVersion) ? current.draftVersion : 1;
-  if (version > DRAFT_VERSION) return null; // written by a newer build; don't guess at it
-  while (version < DRAFT_VERSION) { current = steps[version](current); version += 1; }
-  return { ...current, draftVersion: DRAFT_VERSION };
+  if (!draft || typeof draft !== "object" || isNewerDraft(draft)) return null;
+  try {
+    let current = { ...draft };
+    // Missing, zero, negative or non-integer versions are treated as the first.
+    let version = Number.isInteger(current.draftVersion) && current.draftVersion >= 1 ? current.draftVersion : 1;
+    while (version < DRAFT_VERSION) { current = steps[version](current); version += 1; }
+    return { ...current, draftVersion: DRAFT_VERSION };
+  } catch { return null; } // a damaged draft starts a fresh session instead of a blank page
 }

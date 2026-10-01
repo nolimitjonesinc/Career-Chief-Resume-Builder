@@ -152,3 +152,32 @@ test("default limits fit one real interview: a plan, a dozen answer checks and a
   for (let i = 0; i < 3; i += 1) statuses.push((await handleCareerAI(req("/api/ai/revise", { answer: "a", current: "c", instruction: "shorter" }, headers), env, fetcher)).status);
   assert.deepEqual([...new Set(statuses)], [200]);
 });
+
+test("wrong-typed bodies are rejected before any budget is spent or model is called, without leaking internals", async () => {
+  let called = false;
+  const fetcher = async () => { called = true; return modelResponse("{}"); };
+  const env = on({ AI_DAILY_UNIT_CAP: "1" });
+  const bad = [
+    ["/api/ai/follow-up", { question: { prompt: "q" }, answer: "a", priorAnswers: "abc" }],
+    ["/api/ai/follow-up", { question: { prompt: "q" }, answer: 5 }],
+    ["/api/ai/follow-up", { question: { prompt: "q" }, answer: "a", askedTopics: [1] }],
+    ["/api/ai/revise", { answer: "a", current: "c", instruction: ["x"] }],
+    ["/api/ai/plan", { sources: [null] }],
+    ["/api/ai/plan", { sources: [{ kind: "resume", text: 5 }] }],
+  ];
+  for (const [path, body] of bad) {
+    const response = await handleCareerAI(req(path, body), env, fetcher);
+    assert.equal(response.status, 422, path);
+    const { error } = await response.json();
+    assert.ok(!/is not a function|Cannot read|undefined/.test(error), error);
+  }
+  assert.equal(called, false);
+  // None of that spent the single daily unit.
+  assert.equal((await handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "q" }, answer: "a" }), env, async () => modelResponse(JSON.stringify({ proposal: "Did it." })))).status, 200);
+});
+
+test("an oversized request body is refused", async () => {
+  const huge = new Request("https://example.test/api/ai/follow-up", { method: "POST", headers: { origin: "https://example.test", "content-type": "application/json" }, body: JSON.stringify({ question: { prompt: "q" }, answer: "a".repeat(500_000) }) });
+  const response = await handleCareerAI(huge, on(), async () => { throw new Error("no"); });
+  assert.equal(response.status, 422);
+});

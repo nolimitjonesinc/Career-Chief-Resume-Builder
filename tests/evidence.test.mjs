@@ -85,3 +85,23 @@ test("evidence excerpts never run across two documents or end mid-word", async (
   assert.ok(sentence.startsWith(cut), "excerpt is a real prefix of the sentence");
   assert.ok(cut === sentence || /\s/.test(sentence[cut.length]), "cut falls on a word boundary");
 });
+
+test("a figure that appears only in the job post is NOT supported by the user's own material", () => {
+  const own = [{ id: "r", kind: "resume", name: "Resume", text: "Managed engineers across two sites." }];
+  const t = traceLine("Managed 40 engineers across two sites.", { answers: [], sources: own });
+  assert.deepEqual(t.unsupportedNumbers, ["40"]);
+});
+
+test("a broken or hostile saved draft never blanks the app", async () => {
+  const { migrateDraft, isNewerDraft, DRAFT_VERSION: V } = await import("../src/lib/draft.js");
+  for (const version of [0, -3, 1.5, "2", NaN]) assert.equal(migrateDraft({ draftVersion: version, meta: { role: "x" } }).meta.role, "x");
+  assert.equal(isNewerDraft({ draftVersion: V + 1 }), true);
+  assert.equal(migrateDraft({ draftVersion: V + 1 }), null);
+});
+
+test("the staff pattern does not blow up on hostile input", async () => {
+  const { evaluateRequirements } = await import("../src/lib/analyze.js");
+  const started = Date.now();
+  evaluateRequirements("lead the team", "managed ".repeat(30_000));
+  assert.ok(Date.now() - started < 1500, "took too long");
+});
