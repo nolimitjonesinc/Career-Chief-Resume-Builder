@@ -6,12 +6,12 @@ import { ArrowRight, ArrowCounterClockwise, Play, X } from "@phosphor-icons/reac
 // this one, and a caption bar narrates. It stops the instant the visitor touches
 // anything; nothing here blocks the form.
 const STEPS = [
-  { key: "goal", text: "The goal: a resume built for each job you want.", ms: 3000 },
-  { key: "resume", text: "Start with your resume. Any format, no cleanup.", ms: 2800 },
-  { key: "job", text: "Add the job you want: a posting, a link, or the application questions.", ms: 2800 },
-  { key: "more", text: "Optional: decks, notes, anything that shows what you've really done.", ms: 2800 },
-  { key: "go", text: "Career Chief studies the role and the company.", ms: 2800 },
-  { key: "showcase", text: "Then it asks sharp questions about your own words. You approve every line.", ms: 5200 },
+  { key: "goal", text: "One resume per job.", ms: 2250 },
+  { key: "resume", text: "Drop in your resume. No cleanup.", ms: 2100 },
+  { key: "job", text: "Add the job you want.", ms: 2100 },
+  { key: "more", text: "Add decks and notes. Optional.", ms: 2100 },
+  { key: "go", text: "It matches the role to your evidence.", ms: 2100 },
+  { key: "showcase", text: "Sharp questions. You approve every line.", ms: 3900 },
 ];
 
 const reducedMotion = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -92,7 +92,7 @@ export function Tour({ autoplay, onSample }) {
     setArrow(null);
     el.classList.add("tour-focus");
     const previous = phase > 0 ? target(STEPS[phase - 1].key) : null;
-    if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 700);
+    if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 550);
     later(() => setPhase(phase + 1 < STEPS.length ? phase + 1 : "done"), step.ms);
     return () => clear();
   }, [phase]);
@@ -102,7 +102,7 @@ export function Tour({ autoplay, onSample }) {
 
   if (dismissed) return null;
   const running = typeof phase === "number";
-  const caption = running ? STEPS[phase].text : phase === "done" ? "That's the whole route. Want to see it run?" : "";
+  const caption = running ? STEPS[phase].text : phase === "done" ? "That's the whole route." : "";
 
   return <>
     {arrow && <svg className="tour-arrow" aria-hidden="true"><path d={arrow.d} pathLength="1" /><polygon points={arrow.head} /></svg>}
@@ -115,7 +115,7 @@ export function Tour({ autoplay, onSample }) {
             ? <><button className="tour-primary" onClick={() => { setDismissed(true); clear(); unfocus(); setStage(""); setArrow(null); onSample(); }}>Try it with a sample <ArrowRight size={16} /></button><button className="tour-quiet" onClick={() => play(0)}><ArrowCounterClockwise size={15} /> Replay</button></>
             : <button className="tour-quiet" aria-label="Skip the tour" onClick={stop}><X size={16} /> Skip</button>}
         </div>
-      </> : armed && phase === "idle" ? null : <button className="tour-chip" onClick={() => play(0)}><Play size={14} weight="fill" /> {phase === "stopped" ? "Replay the tour" : "See how it works · 20 sec"}</button>}
+      </> : armed && phase === "idle" ? null : <button className="tour-chip" onClick={() => play(0)}><Play size={14} weight="fill" /> {phase === "stopped" ? "Replay the tour" : "See how it works · 15 sec"}</button>}
     </div>
   </>;
 }
