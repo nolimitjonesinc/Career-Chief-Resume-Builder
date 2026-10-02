@@ -6,12 +6,12 @@ import { ArrowRight, ArrowCounterClockwise, Play, X } from "@phosphor-icons/reac
 // this one, and a caption bar narrates. It stops the instant the visitor touches
 // anything; nothing here blocks the form.
 const STEPS = [
-  { key: "goal", text: "One resume per job.", ms: 2250 },
-  { key: "resume", text: "Drop in your resume. No cleanup.", ms: 2100 },
-  { key: "job", text: "Add the job you want.", ms: 2100 },
-  { key: "more", text: "Add decks and notes. Optional.", ms: 2100 },
-  { key: "go", text: "It matches the role to your evidence.", ms: 2100 },
-  { key: "showcase", text: "Sharp questions. You approve every line.", ms: 3900 },
+  { key: "goal", text: "One resume per job.", ms: 3000 },
+  { key: "resume", text: "Drop in your resume. No cleanup.", ms: 2800 },
+  { key: "job", text: "Add the job you want.", ms: 2800 },
+  { key: "more", text: "Add decks and notes. Optional.", ms: 2800 },
+  { key: "go", text: "It matches the role to your evidence.", ms: 2800 },
+  { key: "showcase", text: "Sharp questions. You approve every line.", ms: 5200 },
 ];
 
 const reducedMotion = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -56,6 +56,8 @@ export function Tour({ autoplay, onSample }) {
   const [arrow, setArrow] = useState(null);
   const [armed, setArmed] = useState(false);
   const timers = useRef([]);
+  const shown = useRef("");
+  const [leaving, setLeaving] = useState(null);
   const reduced = useRef(false);
 
   const clear = () => { timers.current.forEach(clearTimeout); timers.current = []; };
@@ -92,7 +94,7 @@ export function Tour({ autoplay, onSample }) {
     setArrow(null);
     el.classList.add("tour-focus");
     const previous = phase > 0 ? target(STEPS[phase - 1].key) : null;
-    if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 550);
+    if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 700);
     later(() => setPhase(phase + 1 < STEPS.length ? phase + 1 : "done"), step.ms);
     return () => clear();
   }, [phase]);
@@ -100,22 +102,40 @@ export function Tour({ autoplay, onSample }) {
   // Keep the 3-step list in sync, and release the ring when the route ends.
   useEffect(() => { setStage(stageFor(phase)); if (phase === "done") { unfocus(); setArrow(null); } }, [phase]);
 
-  if (dismissed) return null;
+  // The caption plays like a title card: words fly in one after another, a line
+  // draws under them and lands on an arrowhead, and the previous line slides out
+  // as the next arrives. Same stroke language as the connectors.
   const running = typeof phase === "number";
-  const caption = running ? STEPS[phase].text : phase === "done" ? "That's all you have to do! We'll do the rest." : "";
+  const caption = running ? STEPS[phase].text : phase === "done" ? "That\'s all you have to do! We\'ll do the rest." : "";
+  useEffect(() => {
+    if (caption === shown.current) return undefined;
+    const before = shown.current;
+    shown.current = caption;
+    if (!before || !caption) { setLeaving(null); return undefined; }
+    setLeaving(before);
+    const t = setTimeout(() => setLeaving(null), 420);
+    return () => clearTimeout(t);
+  }, [caption]);
 
+  if (dismissed) return null;
   return <>
     {arrow && <svg className="tour-arrow" aria-hidden="true"><path d={arrow.d} pathLength="1" /><polygon points={arrow.head} /></svg>}
     <div className={`tour-pill ${running || phase === "done" ? "open" : "closed"}`} hidden={armed && phase === "idle"} role="status" aria-live="polite">
       {running || phase === "done" ? <>
         <div className="tour-dots" aria-hidden="true">{STEPS.map((s, i) => <span key={s.key} style={{ "--ms": `${s.ms}ms` }} className={running && i === phase ? "on" : phase === "done" || (running && i < phase) ? "past" : ""} />)}</div>
-        <p key={String(phase)}>{caption}</p>
+        <div className="tour-lines">
+          {leaving && <div className="tour-line out" aria-hidden="true"><p>{leaving}</p></div>}
+          <div className="tour-line in" key={caption}>
+            <p aria-label={caption}>{caption.split(" ").map((word, i) => <React.Fragment key={i}><span className="tour-word" aria-hidden="true" style={{ "--i": i }}>{word}</span>{" "}</React.Fragment>)}</p>
+            <svg className="tour-rule" viewBox="0 0 128 12" aria-hidden="true" style={{ "--d": `${0.15 + caption.split(" ").length * 0.07}s` }}><path d="M2 6 H114" pathLength="1" /><polygon points="113,1.5 124,6 113,10.5" /></svg>
+          </div>
+        </div>
         <div className="tour-actions">
           {phase === "done"
             ? <><button className="tour-primary" onClick={() => { setDismissed(true); clear(); unfocus(); setStage(""); setArrow(null); onSample(); }}>Try it with a sample <ArrowRight size={16} /></button><button className="tour-quiet" onClick={() => play(0)}><ArrowCounterClockwise size={15} /> Replay</button></>
             : <button className="tour-quiet" aria-label="Skip the tour" onClick={stop}><X size={16} /> Skip</button>}
         </div>
-      </> : armed && phase === "idle" ? null : <button className="tour-chip" onClick={() => play(0)}><Play size={14} weight="fill" /> {phase === "stopped" ? "Replay the tour" : "See how it works · 15 sec"}</button>}
+      </> : armed && phase === "idle" ? null : <button className="tour-chip" onClick={() => play(0)}><Play size={14} weight="fill" /> {phase === "stopped" ? "Replay the tour" : "See how it works · 20 sec"}</button>}
     </div>
   </>;
 }
