@@ -6,7 +6,7 @@ import { ArrowRight, ArrowCounterClockwise, Play, X } from "@phosphor-icons/reac
 // this one, and a caption bar narrates. It stops the instant the visitor touches
 // anything; nothing here blocks the form.
 const STEPS = [
-  { key: "goal", text: "The goal: a resume built for each job you want.", ms: 3400, circle: true },
+  { key: "goal", text: "The goal: a resume built for each job you want.", ms: 3000 },
   { key: "resume", text: "Start with your resume. Any format, no cleanup.", ms: 2800 },
   { key: "job", text: "Add the job you want: a posting, a link, or the application questions.", ms: 2800 },
   { key: "more", text: "Optional: decks, notes, anything that shows what you've really done.", ms: 2800 },
@@ -21,29 +21,6 @@ const target = (key) => document.querySelector(`[data-tour="${key}"]`);
 const stageFor = (phase) => (phase === "done" ? "3" : typeof phase === "number" ? (STEPS[phase].key === "goal" ? "" : STEPS[phase].key === "showcase" ? "2" : "1") : "");
 const setStage = (stage) => { if (stage) document.body.dataset.tourStage = stage; else delete document.body.dataset.tourStage; };
 const visible = (rect) => rect.bottom > 70 && rect.top < window.innerHeight - 90 && rect.right > 0 && rect.left < window.innerWidth;
-
-// A hand-drawn loop around the text of an element, like a marker. Built from the
-// real text extents (not the full-width box), with a slight wobble and an
-// overshoot past the start so it reads as drawn by hand, deterministically.
-function marker(el) {
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  const r = range.getBoundingClientRect();
-  if (!r.width || !visible(r)) return null;
-  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const rx = r.width / 2 + 26, ry = r.height / 2 + 22;
-  const pts = [];
-  const turn = Math.PI * 2 * 1.06;
-  for (let i = 0; i <= 90; i += 1) {
-    const t = -2.3 + (turn * i) / 90;
-    const wobble = 1 + 0.035 * Math.sin(t * 3 + 0.6) + 0.02 * Math.sin(t * 5);
-    const drift = 1 + 0.045 * (i / 90); // the second pass lands slightly outside the first
-    // Kept inside the screen: on a phone the headline sits close to the edge.
-    const x = Math.min(window.innerWidth - 6, Math.max(6, cx + Math.cos(t) * rx * wobble * drift));
-    pts.push(`${x.toFixed(1)},${(cy + Math.sin(t) * ry * wobble * drift).toFixed(1)}`);
-  }
-  return { d: `M${pts.join(" L")}` };
-}
 
 // A curved connector between two on-screen rectangles, in viewport coordinates.
 function connector(from, to) {
@@ -77,7 +54,6 @@ export function Tour({ autoplay, onSample }) {
   const [dismissed, setDismissed] = useState(false);
   const [phase, setPhase] = useState("idle"); // idle | 0..n-1 | done | stopped
   const [arrow, setArrow] = useState(null);
-  const [circle, setCircle] = useState(null);
   const [armed, setArmed] = useState(false);
   const timers = useRef([]);
   const reduced = useRef(false);
@@ -86,15 +62,15 @@ export function Tour({ autoplay, onSample }) {
   const later = (fn, ms) => { timers.current.push(setTimeout(fn, ms)); };
   const unfocus = () => document.querySelectorAll(".tour-focus").forEach((el) => el.classList.remove("tour-focus"));
 
-  const stop = useCallback(() => { clear(); unfocus(); setArrow(null); setCircle(null); setArmed(false); setPhase((p) => (typeof p === "number" ? "stopped" : p)); }, []);
-  const play = useCallback((index = 0) => { clear(); setArrow(null); setCircle(null); setArmed(false); setPhase(index); }, []);
+  const stop = useCallback(() => { clear(); unfocus(); setArrow(null); setArmed(false); setPhase((p) => (typeof p === "number" ? "stopped" : p)); }, []);
+  const play = useCallback((index = 0) => { clear(); setArrow(null); setArmed(false); setPhase(index); }, []);
 
   useEffect(() => {
     if (!active) return undefined;
     reduced.current = reducedMotion();
     const params = new URLSearchParams(window.location.search);
     if (autoplay && !reduced.current && params.get("tour") !== "off") { setArmed(true); later(() => play(0), 1000); }
-    return () => { clear(); unfocus(); setStage(""); setArrow(null); setCircle(null); };
+    return () => { clear(); unfocus(); setStage(""); setArrow(null); };
   }, [active, autoplay, play]);
 
   // Any real interaction ends the tour at once.
@@ -114,9 +90,7 @@ export function Tour({ autoplay, onSample }) {
     unfocus();
     el.scrollIntoView({ behavior: reduced.current ? "auto" : "smooth", block: "center" });
     setArrow(null);
-    setCircle(null);
-    if (step.circle) later(() => setCircle(marker(el)), reduced.current ? 0 : 400);
-    else el.classList.add("tour-focus");
+    el.classList.add("tour-focus");
     const previous = phase > 0 ? target(STEPS[phase - 1].key) : null;
     if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 700);
     later(() => setPhase(phase + 1 < STEPS.length ? phase + 1 : "done"), step.ms);
@@ -124,14 +98,13 @@ export function Tour({ autoplay, onSample }) {
   }, [phase]);
 
   // Keep the 3-step list in sync, and release the ring when the route ends.
-  useEffect(() => { setStage(stageFor(phase)); if (phase === "done") { unfocus(); setArrow(null); setCircle(null); } }, [phase]);
+  useEffect(() => { setStage(stageFor(phase)); if (phase === "done") { unfocus(); setArrow(null); } }, [phase]);
 
   if (dismissed) return null;
   const running = typeof phase === "number";
   const caption = running ? STEPS[phase].text : phase === "done" ? "That's the whole route. Want to see it run?" : "";
 
   return <>
-    {circle && <svg className="tour-circle" aria-hidden="true"><path d={circle.d} pathLength="1" /></svg>}
     {arrow && <svg className="tour-arrow" aria-hidden="true"><path d={arrow.d} pathLength="1" /><polygon points={arrow.head} /></svg>}
     <div className={`tour-pill ${running || phase === "done" ? "open" : "closed"}`} hidden={armed && phase === "idle"} role="status" aria-live="polite">
       {running || phase === "done" ? <>
