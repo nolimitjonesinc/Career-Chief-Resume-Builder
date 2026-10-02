@@ -54,3 +54,55 @@
 .coverage-proof{display:block;margin-top:2px;font-style:italic}
 .coverage-note{margin:-6px 0 22px}
 .resume-ledger{padding:2px 4px 6px}
+
+/* ---------- Guided tour (prototype) ---------- */
+/* The page's own "1 / 2 / 3" list is the route map; the tour lights the current stage. */
+.intake-steps li{transition:color .3s}
+.intake-steps li b{transition:background .3s,color .3s,transform .3s}
+body[data-tour-stage="1"] [data-tour-step="1"],body[data-tour-stage="2"] [data-tour-step="2"],body[data-tour-stage="3"] [data-tour-step="3"]{color:var(--green)}
+body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data-tour-step="2"] b,body[data-tour-stage="3"] [data-tour-step="3"] b{background:var(--green);color:#fff;transform:scale(1.12)}
+.tour-focus{outline:2px solid var(--green);outline-offset:6px;animation:tour-pulse 1.15s ease-out 2}
+@keyframes tour-pulse{0%{box-shadow:0 0 0 0 rgba(0,98,77,.38)}100%{box-shadow:0 0 0 18px rgba(0,98,77,0)}}
+.tour-arrow{position:fixed;inset:0;width:100vw;height:100vh;z-index:25;pointer-events:none;overflow:visible}
+.tour-arrow path{fill:none;stroke:var(--green);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:tour-draw .7s ease-out forwards}
+.tour-arrow polygon{fill:var(--green);opacity:0;animation:tour-fade .2s ease-out .62s forwards}
+@keyframes tour-draw{to{stroke-dashoffset:0}}
+@keyframes tour-fade{to{opacity:1}}
+[data-tour]{scroll-margin-top:224px}
+.tour-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tour-controls{position:fixed;right:16px;bottom:16px;z-index:40}
+.tour-chip{background:#14212b;color:#fff;border-radius:999px;padding:10px 16px;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,25,18,.28)}
+.tour-chip svg{color:#7fd1b6}
+/* Hand-lettered speech bubbles, drawn on the real screen beside the field they describe. */
+.tour-bubble{position:fixed;z-index:35;width:max-content;max-width:min(270px,calc(100vw - 24px));padding:14px 20px 16px;background:#fffdf4;color:#14212b;border:2.5px solid #14212b;border-radius:255px 24px 225px 24px/24px 225px 24px 255px;box-shadow:3px 5px 0 rgba(20,33,43,.14);opacity:0;pointer-events:none;transform:rotate(var(--rot))}
+.tour-bubble.placed{opacity:1;pointer-events:auto;animation:tour-pop .5s cubic-bezier(.3,1.5,.5,1) both}
+.tour-bubble.out{animation:tour-bye .3s ease-in forwards;pointer-events:none}
+@keyframes tour-pop{0%{opacity:0;transform:scale(.55) rotate(var(--rot))}100%{opacity:1;transform:scale(1) rotate(var(--rot))}}
+@keyframes tour-bye{to{opacity:0;transform:scale(.8) rotate(var(--rot)) translateY(-8px)}}
+.tour-text{margin:0;font:700 31px/1.02 Caveat,"Segoe Print","Bradley Hand","Comic Sans MS",cursive;letter-spacing:.2px;color:#14212b}
+.tour-word{display:inline-block;clip-path:inset(-8px 100% -8px 0);animation:tour-write .26s ease-out forwards;animation-delay:calc(var(--i) * 150ms + .3s)}
+@keyframes tour-write{to{clip-path:inset(-8px -6px -8px 0)}}
+.tour-scribble{display:block;width:96px;height:12px;margin-top:2px;overflow:visible}
+.tour-scribble path{fill:none;stroke:#00624d;stroke-width:3.2;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:tour-draw .5s ease-out forwards;animation-delay:var(--d)}
+.tour-cta{margin-top:10px;display:inline-flex;align-items:center;gap:8px;background:#00624d;color:#fff;border-radius:10px;padding:9px 14px;font:700 17px/1 Caveat,"Segoe Print","Comic Sans MS",cursive;box-shadow:2px 3px 0 rgba(20,33,43,.2);opacity:0;animation:tour-fade .3s ease-out 1.5s forwards}
+/* The tail: a rotated square that shares the bubble's paper and ink, pointing at the field. */
+.tour-tail{position:absolute;width:18px;height:18px;background:#fffdf4;border:2.5px solid #14212b;border-top:0;border-left:0;display:none}
+.tour-bubble.side-top .tour-tail{display:block;left:calc(var(--tail) - 9px);bottom:-11px;transform:rotate(45deg)}
+.tour-bubble.side-bottom .tour-tail{display:block;left:calc(var(--tail) - 9px);top:-11px;transform:rotate(225deg)}
+.tour-bubble.side-right .tour-tail{display:block;top:calc(var(--tail) - 9px);left:-11px;transform:rotate(135deg)}
+.tour-bubble.side-left .tour-tail{display:block;top:calc(var(--tail) - 9px);right:-11px;transform:rotate(-45deg)}
+/* Showcase plays its three beats in order when the tour reaches it. */
+.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:tour-rise-in .55s ease-out both}
+.showcase.tour-focus .showcase-step:nth-of-type(1){animation-delay:.1s}
+.showcase.tour-focus .showcase-arrow:nth-of-type(1){animation-delay:.9s}
+.showcase.tour-focus .showcase-step:nth-of-type(2){animation-delay:1.3s}
+.showcase.tour-focus .showcase-arrow:nth-of-type(2){animation-delay:2.1s}
+.showcase.tour-focus .showcase-step:nth-of-type(3){animation-delay:2.5s}
+@keyframes tour-rise-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  .tour-focus,.tour-arrow path,.tour-arrow polygon,.tour-scribble path,.tour-cta,.tour-bubble,.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:none!important}
+  .tour-arrow path,.tour-scribble path{stroke-dashoffset:0}.tour-arrow polygon,.tour-cta{opacity:1}
+  .tour-word{animation:none!important;clip-path:none}
+  .tour-bubble.placed{opacity:1}
+}
+@media(max-width:650px){.tour-text{font-size:28px}.tour-controls{right:12px;bottom:12px}}

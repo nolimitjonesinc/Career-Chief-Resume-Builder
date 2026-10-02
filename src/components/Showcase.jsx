@@ -6,7 +6,7 @@ import { sampleTransformation } from "../lib/analyze";
 // logic the app uses, so it can only show what the app actually does.
 export function Showcase() {
   const t = sampleTransformation();
-  return <figure className="showcase" aria-label="Example transformation">
+  return <figure className="showcase" data-tour="showcase" aria-label="Example transformation">
     <figcaption><span className="eyebrow">WHAT A QUESTION DOES · FICTIONAL EXAMPLE</span></figcaption>
     <div className="showcase-step"><small>Her resume said</small><p>“{t.said.replace(/\.$/, "")}”</p></div>
     <ArrowRight size={18} className="showcase-arrow" aria-hidden="true" />
