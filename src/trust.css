@@ -76,14 +76,17 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .tour-dots{display:flex;gap:6px}
 .tour-dots span{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.22);overflow:hidden;position:relative}
 .tour-dots span.past{background:#7fd1b6}
-.tour-dots span.on::after{content:"";position:absolute;inset:0;background:#7fd1b6;transform-origin:left;animation:tour-fill 2.8s linear forwards}
-.tour-dots span.on:last-child::after{animation-duration:5.2s}
+.tour-dots span.on::after{content:"";position:absolute;inset:0;background:#7fd1b6;transform-origin:left;animation:tour-fill var(--ms,2.8s) linear forwards}
 @keyframes tour-fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .tour-actions{display:flex;gap:14px;align-items:center;justify-content:flex-end}
 .tour-primary{background:#7fd1b6;color:#06251c;border-radius:8px;padding:9px 14px;font-weight:700;font-size:14px}
 .tour-quiet{color:#c9d8d1;font-size:13px;padding:4px 2px}
 .tour-chip{background:#14212b;color:#fff;border-radius:999px;padding:11px 18px;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,25,18,.28)}
 .tour-chip svg{color:#7fd1b6}
+/* The opening marker circle: drawn by hand around the headline, then erased. */
+.tour-circle{position:fixed;inset:0;width:100vw;height:100vh;z-index:25;pointer-events:none;overflow:visible}
+.tour-circle path{fill:none;stroke:#c8372d;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:.88;stroke-dasharray:1;stroke-dashoffset:1;animation:tour-draw 1.25s cubic-bezier(.45,.05,.3,1) forwards,tour-erase .5s ease-in 2.7s forwards}
+@keyframes tour-erase{to{opacity:0}}
 /* Showcase plays its three beats in order when the tour reaches it. */
 .showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:tour-rise-in .55s ease-out both}
 .showcase.tour-focus .showcase-step:nth-of-type(1){animation-delay:.1s}
@@ -93,8 +96,8 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .showcase.tour-focus .showcase-step:nth-of-type(3){animation-delay:2.5s}
 @keyframes tour-rise-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){
-  .tour-focus,.tour-pill,.tour-pill p,.tour-arrow path,.tour-arrow polygon,.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:none!important}
-  .tour-arrow path{stroke-dashoffset:0}.tour-arrow polygon{opacity:1}
+  .tour-focus,.tour-pill,.tour-pill p,.tour-arrow path,.tour-circle path,.tour-arrow polygon,.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:none!important}
+  .tour-arrow path,.tour-circle path{stroke-dashoffset:0}.tour-arrow polygon{opacity:1}
   .tour-dots span.on::after{animation:none;transform:none}
 }
 @media(max-width:650px){.tour-pill.open{bottom:10px;padding:11px 14px}.tour-pill p{font-size:14px}}
