@@ -71,7 +71,7 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .tour-pill{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:30;max-width:min(560px,calc(100vw - 24px));width:max-content}
 .tour-pill.open{background:#14212b;color:#fff;border-radius:14px;padding:12px 16px 12px;box-shadow:0 12px 40px rgba(0,25,18,.3);display:grid;gap:8px;width:min(560px,calc(100vw - 24px));animation:tour-rise .35s ease-out}
 @keyframes tour-rise{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
-.tour-pill p{margin:0;color:#fff;font-size:18px;font-weight:600;letter-spacing:-.1px;line-height:1.35;animation:tour-fade-in .4s ease-out}
+.tour-pill p{margin:0;text-wrap:balance;color:#fff;font-size:18px;font-weight:600;letter-spacing:-.1px;line-height:1.35;animation:tour-fade-in .4s ease-out}
 @keyframes tour-fade-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .tour-dots{display:flex;gap:6px}
 .tour-dots span{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.22);overflow:hidden;position:relative}

@@ -102,7 +102,7 @@ export function Tour({ autoplay, onSample }) {
 
   if (dismissed) return null;
   const running = typeof phase === "number";
-  const caption = running ? STEPS[phase].text : phase === "done" ? "That's the whole route." : "";
+  const caption = running ? STEPS[phase].text : phase === "done" ? "That's all you have to do! We'll do the rest." : "";
 
   return <>
     {arrow && <svg className="tour-arrow" aria-hidden="true"><path d={arrow.d} pathLength="1" /><polygon points={arrow.head} /></svg>}
