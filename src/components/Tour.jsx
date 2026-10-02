@@ -8,8 +8,8 @@ import "@fontsource/caveat/latin-700.css";
 // for. The bubble writes itself in, then pops away as the tour moves on. It
 // stops the instant the visitor touches anything; nothing here blocks the form.
 const STEPS = [
-  { key: "goal", text: "One resume per job.", ms: 3000 },
-  { key: "resume", text: "Drop in your resume. No cleanup.", ms: 2800 },
+  { key: "goal", text: "One custom resume per job.", ms: 3000 },
+  { key: "resume", text: "Drop in your current resume.", ms: 2800 },
   { key: "job", text: "Add the job you want.", ms: 2800 },
   { key: "more", text: "Add decks and notes. Optional.", ms: 2800 },
   { key: "go", text: "It matches the role to your evidence.", ms: 2800 },
@@ -74,8 +74,15 @@ function Bubble({ bubble, onCta }) {
   const [pos, setPos] = useState(null);
   useLayoutEffect(() => {
     const node = ref.current;
-    if (!node || !bubble.el) return;
-    setPos(place(bubble.el.getBoundingClientRect(), { w: node.offsetWidth, h: node.offsetHeight }));
+    if (!node || !bubble.el) return undefined;
+    const measure = () => setPos(place(bubble.el.getBoundingClientRect(), { w: node.offsetWidth, h: node.offsetHeight }));
+    measure();
+    // The handwriting font loads on first use. Measured in the fallback font a
+    // long line looks one row tall, then grows and covers its own field. Measure
+    // again once the real font is in.
+    let live = true;
+    document.fonts?.load("700 31px Caveat").then(() => { if (live) measure(); }).catch(() => {});
+    return () => { live = false; };
   }, [bubble.el]);
   const words = bubble.text.split(" ");
   const origin = !pos ? "50% 50%" : pos.side === "top" ? `${pos.tail}px 100%` : pos.side === "bottom" ? `${pos.tail}px 0` : pos.side === "right" ? `0 ${pos.tail}px` : pos.side === "left" ? `100% ${pos.tail}px` : "50% 50%";
@@ -103,6 +110,18 @@ export function Tour({ autoplay, onSample }) {
   const clear = () => { timers.current.forEach(clearTimeout); timers.current = []; };
   const later = (fn, ms) => { timers.current.push(setTimeout(fn, ms)); };
   const unfocus = () => document.querySelectorAll(".tour-focus").forEach((el) => el.classList.remove("tour-focus"));
+  // Run `fn` once the element has stopped moving (smooth scrolling finished), so
+  // the bubble and arrow are placed against where the field really ends up.
+  const settle = (el, fn, maxMs = 1600) => {
+    let last = null, still = 0, waited = 0;
+    const tick = () => {
+      const top = el.getBoundingClientRect().top;
+      still = last !== null && Math.abs(top - last) < 0.5 ? still + 1 : 0;
+      last = top; waited += 50;
+      if (still >= 3 || waited >= maxMs) fn(); else later(tick, 50);
+    };
+    later(tick, 50);
+  };
   const dropBubbles = () => setBubbles((list) => list.map((b) => ({ ...b, out: true })));
   const showBubble = (text, el, cta = false) => setBubbles((list) => [...list.map((b) => ({ ...b, out: true })), { id: ++serial.current, tilt: serial.current, text, el, cta, out: false }]);
 
@@ -118,6 +137,7 @@ export function Tour({ autoplay, onSample }) {
 
   useEffect(() => {
     reduced.current = reducedMotion();
+    document.fonts?.load("700 31px Caveat").catch(() => {});
     const params = new URLSearchParams(window.location.search);
     if (autoplay && !reduced.current && params.get("tour") !== "off") { setArmed(true); later(() => play(0), 1000); }
     return () => { clear(); unfocus(); setStage(""); setArrow(null); };
@@ -151,8 +171,8 @@ export function Tour({ autoplay, onSample }) {
     el.scrollIntoView({ behavior: reduced.current ? "auto" : "smooth", block: tall ? "start" : "center" });
     el.classList.add("tour-focus");
     const previous = finale ? target(STEPS[STEPS.length - 1].key) : phase > 0 ? target(STEPS[phase - 1].key) : null;
-    if (previous && !reduced.current) later(() => setArrow(connector(previous, el)), 700);
-    later(() => showBubble(step.text, el, finale), reduced.current ? 0 : 450);
+    if (previous && !reduced.current) settle(el, () => setArrow(connector(previous, el)));
+    settle(el, () => showBubble(step.text, el, finale));
     if (!finale) later(() => setPhase(phase + 1 < STEPS.length ? phase + 1 : "done"), step.ms);
     return () => clear();
   }, [phase]);
