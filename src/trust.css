@@ -68,20 +68,29 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .tour-arrow polygon{fill:var(--green);opacity:0;animation:tour-fade .2s ease-out .62s forwards}
 @keyframes tour-draw{to{stroke-dashoffset:0}}
 @keyframes tour-fade{to{opacity:1}}
-.tour-pill{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:30;max-width:min(560px,calc(100vw - 24px));width:max-content}
-.tour-pill.open{background:#14212b;color:#fff;border-radius:14px;padding:12px 16px 12px;box-shadow:0 12px 40px rgba(0,25,18,.3);display:grid;gap:8px;width:min(560px,calc(100vw - 24px));animation:tour-rise .35s ease-out}
-@keyframes tour-rise{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
-.tour-pill p{margin:0;text-wrap:balance;color:#fff;font-size:18px;font-weight:600;letter-spacing:-.1px;line-height:1.35}
-.tour-dots{display:flex;gap:6px}
-.tour-dots span{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.22);overflow:hidden;position:relative}
-.tour-dots span.past{background:#7fd1b6}
-.tour-dots span.on::after{content:"";position:absolute;inset:0;background:#7fd1b6;transform-origin:left;animation:tour-fill var(--ms,2.8s) linear forwards}
-@keyframes tour-fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-.tour-actions{display:flex;gap:14px;align-items:center;justify-content:flex-end}
-.tour-primary{background:#7fd1b6;color:#06251c;border-radius:8px;padding:9px 14px;font-weight:700;font-size:14px}
-.tour-quiet{color:#c9d8d1;font-size:13px;padding:4px 2px}
-.tour-chip{background:#14212b;color:#fff;border-radius:999px;padding:11px 18px;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,25,18,.28)}
+[data-tour]{scroll-margin-top:224px}
+.tour-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tour-controls{position:fixed;right:16px;bottom:16px;z-index:40}
+.tour-chip{background:#14212b;color:#fff;border-radius:999px;padding:10px 16px;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,25,18,.28)}
 .tour-chip svg{color:#7fd1b6}
+/* Hand-lettered speech bubbles, drawn on the real screen beside the field they describe. */
+.tour-bubble{position:fixed;z-index:35;width:max-content;max-width:min(270px,calc(100vw - 24px));padding:14px 20px 16px;background:#fffdf4;color:#14212b;border:2.5px solid #14212b;border-radius:255px 24px 225px 24px/24px 225px 24px 255px;box-shadow:3px 5px 0 rgba(20,33,43,.14);opacity:0;pointer-events:none;transform:rotate(var(--rot))}
+.tour-bubble.placed{opacity:1;pointer-events:auto;animation:tour-pop .5s cubic-bezier(.3,1.5,.5,1) both}
+.tour-bubble.out{animation:tour-bye .3s ease-in forwards;pointer-events:none}
+@keyframes tour-pop{0%{opacity:0;transform:scale(.55) rotate(var(--rot))}100%{opacity:1;transform:scale(1) rotate(var(--rot))}}
+@keyframes tour-bye{to{opacity:0;transform:scale(.8) rotate(var(--rot)) translateY(-8px)}}
+.tour-text{margin:0;font:700 31px/1.02 Caveat,"Segoe Print","Bradley Hand","Comic Sans MS",cursive;letter-spacing:.2px;color:#14212b}
+.tour-word{display:inline-block;clip-path:inset(-8px 100% -8px 0);animation:tour-write .26s ease-out forwards;animation-delay:calc(var(--i) * 150ms + .3s)}
+@keyframes tour-write{to{clip-path:inset(-8px -6px -8px 0)}}
+.tour-scribble{display:block;width:96px;height:12px;margin-top:2px;overflow:visible}
+.tour-scribble path{fill:none;stroke:#00624d;stroke-width:3.2;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:tour-draw .5s ease-out forwards;animation-delay:var(--d)}
+.tour-cta{margin-top:10px;display:inline-flex;align-items:center;gap:8px;background:#00624d;color:#fff;border-radius:10px;padding:9px 14px;font:700 17px/1 Caveat,"Segoe Print","Comic Sans MS",cursive;box-shadow:2px 3px 0 rgba(20,33,43,.2);opacity:0;animation:tour-fade .3s ease-out 1.5s forwards}
+/* The tail: a rotated square that shares the bubble's paper and ink, pointing at the field. */
+.tour-tail{position:absolute;width:18px;height:18px;background:#fffdf4;border:2.5px solid #14212b;border-top:0;border-left:0;display:none}
+.tour-bubble.side-top .tour-tail{display:block;left:calc(var(--tail) - 9px);bottom:-11px;transform:rotate(45deg)}
+.tour-bubble.side-bottom .tour-tail{display:block;left:calc(var(--tail) - 9px);top:-11px;transform:rotate(225deg)}
+.tour-bubble.side-right .tour-tail{display:block;top:calc(var(--tail) - 9px);left:-11px;transform:rotate(135deg)}
+.tour-bubble.side-left .tour-tail{display:block;top:calc(var(--tail) - 9px);right:-11px;transform:rotate(-45deg)}
 /* Showcase plays its three beats in order when the tour reaches it. */
 .showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:tour-rise-in .55s ease-out both}
 .showcase.tour-focus .showcase-step:nth-of-type(1){animation-delay:.1s}
@@ -91,25 +100,9 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .showcase.tour-focus .showcase-step:nth-of-type(3){animation-delay:2.5s}
 @keyframes tour-rise-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){
-  .tour-focus,.tour-pill,.tour-pill p,.tour-arrow path,.tour-arrow polygon,.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:none!important}
-  .tour-arrow path{stroke-dashoffset:0}.tour-arrow polygon{opacity:1}
-  .tour-dots span.on::after{animation:none;transform:none}
+  .tour-focus,.tour-arrow path,.tour-arrow polygon,.tour-scribble path,.tour-cta,.tour-bubble,.showcase.tour-focus .showcase-step,.showcase.tour-focus .showcase-arrow{animation:none!important}
+  .tour-arrow path,.tour-scribble path{stroke-dashoffset:0}.tour-arrow polygon,.tour-cta{opacity:1}
+  .tour-word{animation:none!important;clip-path:none}
+  .tour-bubble.placed{opacity:1}
 }
-@media(max-width:650px){.tour-pill.open{bottom:10px;padding:11px 14px}.tour-pill p{font-size:17px}}
-
-/* Kinetic captions: words fly in, a line draws and lands on an arrowhead, the old line exits forward. */
-.tour-lines{display:grid}
-.tour-line{grid-area:1/1;display:grid;gap:8px;align-content:start}
-.tour-line.in .tour-word{display:inline-block;opacity:0;transform:translate(14px,12px);filter:blur(6px);animation:tour-word .55s cubic-bezier(.2,.7,.2,1) forwards;animation-delay:calc(var(--i) * 70ms + 80ms)}
-@keyframes tour-word{to{opacity:1;transform:none;filter:blur(0)}}
-.tour-line.out{animation:tour-out .38s ease-in forwards}
-@keyframes tour-out{to{opacity:0;transform:translateX(-26px);filter:blur(3px)}}
-.tour-rule{width:128px;height:12px;overflow:visible}
-.tour-line.in .tour-rule path{fill:none;stroke:#7fd1b6;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:tour-draw .6s ease-out forwards;animation-delay:var(--d)}
-.tour-line.in .tour-rule polygon{fill:#7fd1b6;opacity:0;animation:tour-fade .2s ease-out forwards;animation-delay:calc(var(--d) + .5s)}
-@media (prefers-reduced-motion:reduce){
-  .tour-line.in .tour-word{animation:none!important;opacity:1;transform:none;filter:none}
-  .tour-line.out{display:none}
-  .tour-line.in .tour-rule path{animation:none!important;stroke-dashoffset:0}
-  .tour-line.in .tour-rule polygon{animation:none!important;opacity:1}
-}
+@media(max-width:650px){.tour-text{font-size:28px}.tour-controls{right:12px;bottom:12px}}
