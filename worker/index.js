@@ -1,5 +1,6 @@
 import { extractPublicUrl } from "../shared/url-extract.mjs";
 import { handleCareerAI } from "../shared/career-ai.mjs";
+import { assertAllowedOrigin, GuardError } from "../shared/ai-guard.mjs";
 
 export default {
   async fetch(request, env) {
@@ -8,10 +9,13 @@ export default {
     if (requestUrl.pathname === "/api/extract-url") {
       if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
       try {
+        // The link reader is a public-URL fetcher: only our own pages may call it.
+        assertAllowedOrigin(request, env);
         const { url } = await request.json();
-        const result = await extractPublicUrl(url, env.URL_FETCH || fetch);
+        const result = await extractPublicUrl(url, env.URL_FETCH || fetch, { resolve: env.URL_RESOLVE });
         return Response.json(result);
       } catch (error) {
+        if (error instanceof GuardError) return Response.json({ error: error.message }, { status: error.status });
         return Response.json({ error: error.message || "The link could not be read." }, { status: 422 });
       }
     }

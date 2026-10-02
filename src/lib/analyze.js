@@ -1,3 +1,5 @@
+import { probeQuestions } from "./probes.js";
+
 export const sourceLabels = {
   resume: "Resume",
   job: "Job description",
@@ -37,11 +39,64 @@ export const sampleSources = [
   { id: "sample-application", kind: "application", name: "Application questions", origin: "Application form", text: "What creator program have you built? Which content teams have you directly led? How do you measure content performance?", status: "ready" },
 ];
 
-const priorities = [
-  ["creator", "Creator / contributor program"], ["community", "Community building"], ["editorial", "Editorial leadership"],
-  ["social", "Social leadership"], ["acquisition", "Customer acquisition"], ["growth", "Measurable growth"],
-  ["trust", "Audience trust"], ["team", "Team leadership"], ["strategy", "Brand strategy"],
+// Each theme says how to spot it in a job post (job) and in the candidate's own
+// material (support). The first nine came with the marketing sample and match by
+// their key; the rest make the rule-based analyzer useful beyond marketing roles.
+const keyed = (key, label, support) => ({ key, label, job: new RegExp(key), support });
+export const themes = [
+  keyed("creator", "Creator / contributor program", /creator|contributor|expert content program|participant sourcing/),
+  keyed("community", "Community building", /community|audience program/),
+  keyed("editorial", "Editorial leadership", /editorial|content team|content program/),
+  keyed("social", "Social leadership", /social/),
+  keyed("acquisition", "Customer acquisition", /acquisition|customer adoption|prospective customer/),
+  keyed("growth", "Measurable growth", /growth|increase|improved|expanded/),
+  keyed("trust", "Audience trust", /trust|sensitive customer|credibility/),
+  keyed("team", "Team leadership", /team|direct reports|people manager|managed (?:[a-z]+ ){0,4}staff/),
+  keyed("strategy", "Brand strategy", /strategy|positioning/),
+  { key: "analytics", label: "Analytics & measurement", job: /analytic|data[- ]driven|metrics|\bkpis?\b|measure|dashboard|a\/b test|insights/, support: /analytic|metric|kpi|measur|dashboard|\bdata\b|a\/b|insight/ },
+  { key: "product", label: "Product & roadmap", job: /product (strategy|management|roadmap|manager)|roadmap|product-led|go-to-market|\bgtm\b/, support: /product|roadmap|launch|go-to-market|\bgtm\b|feature/ },
+  { key: "engineering", label: "Engineering & systems", job: /software|engineer|backend|frontend|full[- ]stack|\bapi\b|infrastructure|cloud|devops|architecture/, support: /software|engineer|\bcode\b|develop|deploy|\bapi\b|infrastructure|cloud|architect|system/ },
+  { key: "sales", label: "Revenue & sales", job: /\bsales\b|revenue|quota|pipeline|business development|account (executive|management)/, support: /sales|revenue|quota|pipeline|closed|bookings|\barr\b/ },
+  { key: "operations", label: "Operations & process", job: /operations|process improvement|supply chain|logistics|efficiency|workflow/, support: /operation|process|supply|logistic|efficien|workflow|streamlin/ },
+  { key: "projects", label: "Project delivery", job: /project management|program management|implementation|deliver(y|ing)|\bpmo\b/, support: /project|program|implement|deliver|rollout|launched/ },
+  { key: "stakeholders", label: "Stakeholder leadership", job: /stakeholder|executive|c-suite|cross[- ]functional/, support: /stakeholder|executive|c-suite|cross[- ]functional|sponsor|board/ },
+  { key: "customer", label: "Customer outcomes", job: /customer success|customer experience|client (relationship|service)|retention|churn|onboarding/, support: /customer|client|retention|churn|onboard|satisf/ },
+  { key: "finance", label: "Budget & finance", job: /budget|p&l|forecast|financial|finance|cost reduction/, support: /budget|p&l|forecast|financ|\bcost|margin/ },
+  { key: "compliance", label: "Compliance & risk", job: /compliance|regulat|risk management|audit|governance|security|privacy/, support: /compliance|regulat|risk|audit|governance|security|privacy|hipaa|gdpr|\bsox\b/ },
+  { key: "hiring", label: "Hiring & coaching", job: /hiring|recruit|talent|mentor|coach|performance management/, support: /hir(e|ed|ing)|recruit|talent|mentor|coach/ },
+  { key: "design", label: "Design & experience", job: /\bdesign|\bux\b|user experience|figma|prototype/, support: /design|\bux\b|user experience|figma|prototype|usab/ },
+  { key: "ai", label: "AI & automation", job: /\bai\b|machine learning|\bllm|generative|automation/, support: /\bai\b|machine learning|\bllm|generative|automat/ },
 ];
+
+// The sentence that best shows a theme: a real sentence beats a bare title, and
+// among those the one that matches most.
+const clipAtWord = (text, n) => (text.length <= n ? text : `${text.slice(0, n).replace(/\s+\S*$/, "")}…`);
+const sentenceAround = (text, pattern) => {
+  const global = new RegExp(pattern.source, "g");
+  const matching = String(text).split(/(?<=[.!?])\s+|\n+/).map((line) => line.trim()).filter((line) => line && pattern.test(line.toLowerCase()));
+  const best = matching.map((line) => ({ line, score: (line.toLowerCase().match(global) || []).length + (line.length >= 30 ? 10 : 0) })).sort((x, y) => y.score - x.score)[0];
+  return best ? clipAtWord(best.line, 180) : "";
+};
+
+// Which role priorities does this material support, how strongly, and where is
+// the proof? Pure so the same logic serves the hiring case, the live coverage
+// view after each answer, and the side-by-side job comparison.
+export function evaluateRequirements(jobText, careerText) {
+  const job = String(jobText || "").toLowerCase();
+  // Capped so a pathological paste can't stall the page on every keystroke.
+  const career = String(careerText || "").slice(0, 300_000).toLowerCase();
+  return themes.filter((theme) => theme.job.test(job)).map((theme) => {
+    const hits = (career.match(new RegExp(theme.support.source, "g")) || []).length;
+    return { key: theme.key, label: theme.label, supported: hits > 0, strength: hits >= 2 ? "solid" : hits === 1 ? "thin" : "none", evidence: hits ? sentenceAround(careerText, theme.support) : "" };
+  });
+}
+
+// Coverage as the interview goes on: documents plus the answers approved so far.
+export function coverageFor(sources, answerTexts = []) {
+  const role = sources.filter(isRoleSource).map((source) => source.text).join("\n");
+  const career = [...sources.filter(isCareerSource).map((source) => source.text), ...answerTexts].join("\n");
+  return evaluateRequirements(role, career);
+}
 
 function makeDoc(resumeText, role, candidateContext = "") {
   const lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
@@ -111,25 +166,12 @@ function questionPlan(allText, role, isSample) {
 export function analyzeSources(sources, meta) {
   const allText = sources.map((source) => source.text).join("\n");
   const resumeText = sources.find((source) => source.kind === "resume")?.text || "";
-  const careerText = sources.filter(isCareerSource).map((source) => source.text).join(" ");
-  const jobText = sources.filter(isRoleSource).map((source) => source.text).join(" ");
-  const lowerCareer = careerText.toLowerCase();
-  const lowerJob = jobText.toLowerCase();
-  const supportPatterns = {
-    creator: /creator|contributor|expert content program|participant sourcing/,
-    community: /community|audience program/,
-    editorial: /editorial|content team|content program/,
-    social: /social/,
-    acquisition: /acquisition|customer adoption|prospective customer/,
-    growth: /growth|increase|improved|expanded/,
-    trust: /trust|sensitive customer|credibility/,
-    team: /team|direct reports|people manager|managed [a-z -]*staff/,
-    strategy: /strategy|positioning/,
-  };
-  const requirements = priorities.filter(([key]) => lowerJob.includes(key)).map(([key, label]) => ({ key, label, supported: supportPatterns[key].test(lowerCareer) }));
+  const careerText = sources.filter(isCareerSource).map((source) => source.text).join("\n");
+  const jobText = sources.filter(isRoleSource).map((source) => source.text).join("\n");
+  const requirements = evaluateRequirements(jobText, careerText);
   const isSample = sources.some((source) => source.id === "sample-job");
   const baseQuestions = questionPlan(allText, meta.role, isSample);
-  const questions = [...baseQuestions.slice(0, 1), ...deckQuestions(sources), ...baseQuestions.slice(1)];
+  const questions = [...baseQuestions.slice(0, 1), ...deckQuestions(sources), ...probeQuestions(sources, isCareerSource, undefined, isSample ? 1 : 3), ...baseQuestions.slice(1)];
   const known = requirements.filter((item) => item.supported).map((item) => item.label);
   const gaps = requirements.filter((item) => !item.supported).map((item) => item.label);
   const research = sources.filter(isResearchSource).map((source) => ({
@@ -166,4 +208,12 @@ export function proposeResumeUpdate(doc, question, answer) {
     return "Built a customer and expert content program, creating the strategy and participant-sourcing process with Sales and Operations, selecting the production partner, and approving stories and final edits.";
   }
   return `${capitalized.replace(/[.]+$/, "")}.`;
+}
+
+// The homepage's before/after, built from the real sample and the real
+// proposal function, so it can only ever show what the app actually does.
+export function sampleTransformation() {
+  const question = questionPlan("", "", true)[0];
+  const said = sampleResume.split(/(?<=[.!?])\s+|\n+/).find((line) => /partnerships/i.test(line)) || "";
+  return { said, asked: question.prompt, answer: question.sample, became: proposeResumeUpdate({}, question, question.sample) };
 }

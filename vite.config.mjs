@@ -2,17 +2,28 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { extractPublicUrl } from "./shared/url-extract.mjs";
 import { handleCareerAI } from "./shared/career-ai.mjs";
+import { aiEnvFrom } from "./shared/ai-guard.mjs";
+
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 function urlExtractor() {
   return {
     name: "career-chief-url-extractor",
     configureServer(server) {
       server.middlewares.use("/api/ai", async (req, res, next) => {
+        // The dev server listens on the whole network on purpose. The AI route does
+        // not: only this machine may spend the key, whoever else is on the wifi.
+        if (req.url !== "/status" && !LOOPBACK.has(req.socket.remoteAddress || "")) {
+          res.statusCode = 403;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: "AI routes only answer requests from this machine." }));
+          return;
+        }
         try {
           const chunks = [];
           for await (const chunk of req) chunks.push(chunk);
           const request = new Request(`http://localhost/api/ai${req.url}`, { method: req.method, headers: req.headers, body: req.method === "GET" ? undefined : Buffer.concat(chunks) });
-          const response = await handleCareerAI(request, { OPENAI_API_KEY: process.env.OPENAI_API_KEY });
+          const response = await handleCareerAI(request, aiEnvFrom(process.env));
           res.statusCode = response.status;
           res.setHeader("content-type", "application/json");
           res.end(await response.text());
