@@ -126,9 +126,13 @@ export function Tour({ autoplay, onSample }) {
   // Any real interaction ends the tour at once.
   useEffect(() => {
     if (typeof phase !== "number") return undefined;
+    // The tour's own buttons are excluded: Skip and the Replay chip share a corner,
+    // so stopping on the first touch would swap the chip under the finger and the
+    // click would land on Replay, restarting the tour. Skip stops on its click.
+    const onInput = (event) => { if (event.target instanceof Element && event.target.closest(".tour-controls")) return; stop(); };
     const events = ["pointerdown", "wheel", "keydown", "touchstart"];
-    events.forEach((name) => window.addEventListener(name, stop, { passive: true }));
-    return () => events.forEach((name) => window.removeEventListener(name, stop));
+    events.forEach((name) => window.addEventListener(name, onInput, { passive: true }));
+    return () => events.forEach((name) => window.removeEventListener(name, onInput));
   }, [phase, stop]);
 
   // Drive one stop: scroll to it, ring it, draw the arrow from the last stop,
