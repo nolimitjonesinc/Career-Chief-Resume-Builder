@@ -8,11 +8,11 @@ import "@fontsource/caveat/latin-700.css";
 // for. The bubble writes itself in, then pops away as the tour moves on. It
 // stops the instant the visitor touches anything; nothing here blocks the form.
 const STEPS = [
-  { key: "goal", text: "Every job gets its own resume. Updated. Custom tailored. Done.", ms: 4200 },
-  { key: "resume", text: "Drop in your current resume.", ms: 2800 },
+  { key: "goal", text: "Every job gets its own resume. Updated. Custom tailored. For you.", ms: 4200 },
+  { key: "resume", text: "Just drop in your current resume.", ms: 2800 },
   { key: "job", text: "Add the job you want.", ms: 2800 },
   { key: "more", text: "Add decks and notes. Optional.", ms: 2800 },
-  { key: "go", text: "It matches the role to your evidence.", ms: 2800 },
+  { key: "go", text: "It tailors your evidence to the new role.", ms: 2800 },
   { key: "showcase", text: "Sharp questions. You approve every line.", ms: 5200 },
 ];
 
