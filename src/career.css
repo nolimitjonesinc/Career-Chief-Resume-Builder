@@ -53,3 +53,14 @@ label>input,label>textarea,label>select{margin-top:8px}
 @media(max-width:650px){header{padding:0 14px}.brand{font-size:21px;gap:6px}.brand svg{width:24px;height:24px}.header-right{gap:12px}.start-new{font-size:12px}.start-new svg{display:none}.finish-long{display:none}.header-right .primary{padding:10px 16px}}
 
 .intake-steps{list-style:none;margin:22px 0 10px;padding:0;display:flex;flex-wrap:wrap;gap:10px 22px}.intake-steps li{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;color:var(--ink)}.intake-steps b{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--soft);color:var(--green);font-size:12px}
+
+.pro-badge{background:var(--green);color:#fff;border-radius:999px;padding:8px 14px;font-size:11px;letter-spacing:1.2px}
+.license-row{display:flex;gap:8px;margin:10px 0;align-items:stretch}
+.license-row input{flex:1;min-width:0}
+.pro-success{background:#e6f2eb;color:#23543e;border-radius:7px;padding:12px 14px;font-size:14px;margin:12px 0}
+.pro-exports-note{font-size:13px;color:var(--muted);margin:14px 0 4px;line-height:1.55}
+.tier-list{display:flex;flex-direction:column;gap:8px;margin:14px 0 6px}
+.tier-option{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:13px 16px;font-weight:600;color:var(--ink);text-decoration:none}
+.tier-option:hover{border-color:#87ac9b;background:#f5f8f6}
+.tier-option strong{font-size:15px}
+.tier-option span{font-size:13px;color:var(--muted);text-align:right}

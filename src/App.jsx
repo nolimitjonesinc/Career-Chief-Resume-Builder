@@ -18,7 +18,10 @@ import { ProposalWhy } from "./components/ProposalWhy";
 import { Showcase } from "./components/Showcase";
 import { CompareJobs } from "./components/Compare";
 import { Tour } from "./components/Tour";
+import { ProDialog, ProHeaderControl } from "./components/Pro";
 import { trimForAi } from "../shared/source-limits.mjs";
+import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
+import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
 import { exportResume } from "./lib/exporters";
 
 const blankMeta = { company: "", role: "" };
@@ -63,12 +66,35 @@ export function App() {
   const [aiEnabled, setAiEnabled] = useState(false);
   // Consent is per session (Rule 8): it is deliberately not restored from the saved draft.
   const [aiConsent, setAiConsent] = useState(false);
+  // Pro license: "checking" on load, then "pro" or "free". The free tier is the
+  // default and is never locked out; a failed check fails closed to free.
+  const [pro, setPro] = useState("checking");
+  const [proKeyInput, setProKeyInput] = useState("");
+  const [proBusy, setProBusy] = useState("");
+  const [proError, setProError] = useState("");
+  const [proSuccess, setProSuccess] = useState("");
+  const [proMasked, setProMasked] = useState("");
+  const lsConfig = useMemo(() => licenseConfig(), []);
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
   const [compareList, setCompareList] = useState(initialDraft?.compareJobs || []);
   const dialog = useRef(null);
   const priorFocus = useRef(null);
 
   useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => setAiEnabled(Boolean(value.enabled))).catch(() => {}); }, []);
+  // Revalidate a stored Pro license at most once a day (cached in the record).
+  // Any failure fails closed: the user keeps the free tier with an explanation.
+  useEffect(() => {
+    let alive = true;
+    validateStoredLicense()
+      .then(({ state, notice }) => {
+        if (!alive) return;
+        setPro(state);
+        if (state === "pro") setProMasked(maskLicenseKey(getStoredLicense()?.licenseKey));
+        if (notice) setNotice(notice);
+      })
+      .catch(() => { if (alive) setPro("free"); });
+    return () => { alive = false; };
+  }, []);
   useEffect(() => {
     if (savedByNewer) return;
     try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, draftVersion: DRAFT_VERSION })); }
@@ -342,7 +368,64 @@ export function App() {
     setNotice("Your direct edits are saved. Future suggestions still require your approval.");
   }
 
+  function openPro() {
+    setProError("");
+    setProSuccess("");
+    setModal("pro");
+  }
+
+  async function handleProActivate(rawKey) {
+    setProBusy("activate");
+    setProError("");
+    setProSuccess("");
+    try {
+      const result = await activateLicense(rawKey);
+      if (result.ok) {
+        setPro("pro");
+        setProMasked(maskLicenseKey(getStoredLicense()?.licenseKey));
+        setProKeyInput("");
+        setProSuccess("Pro is active — finished exports are unlocked on this browser.");
+      } else {
+        setProError(result.error);
+      }
+    } catch {
+      setProError("Activation failed. Check your connection and try again.");
+    } finally {
+      setProBusy("");
+    }
+  }
+
+  async function handleProDeactivate() {
+    setProBusy("deactivate");
+    setProError("");
+    setProSuccess("");
+    try {
+      const result = await deactivateLicense();
+      setPro("free");
+      setProMasked("");
+      if (result.ok) {
+        setProSuccess("Pro was deactivated on this browser.");
+      } else {
+        // The key was still removed locally; tell the user what didn't confirm.
+        setProError(result.error);
+      }
+    } catch {
+      setPro("free");
+      setProMasked("");
+      setProError("The license was removed from this browser.");
+    } finally {
+      setProBusy("");
+    }
+  }
+
   async function downloadResume(format) {
+    // The paid side of the boundary: finished file exports need Pro. The
+    // interview, preview, and editing stay free — so this redirects to the
+    // Pro dialog instead of blocking with a dead button.
+    if (!isProActive(pro)) {
+      openPro();
+      return;
+    }
     setBusy(`Creating ${format.toUpperCase()}…`);
     try {
       await exportResume(doc, format);
@@ -394,7 +477,7 @@ export function App() {
   }
 
   return <>
-    <Header hasDraft={Boolean(doc)} hasAnything={Boolean(doc || sources.length || resumeText.trim() || jobText.trim() || meta.role.trim())} startNew={() => setModal("start-new")} finish={() => setModal("finish")} home={() => setModal("home")} />
+    <Header hasDraft={Boolean(doc)} hasAnything={Boolean(doc || sources.length || resumeText.trim() || jobText.trim() || meta.role.trim())} startNew={() => setModal("start-new")} finish={() => setModal("finish")} home={() => setModal("home")} pro={pro} openPro={openPro} />
     <div className="demo-strip"><strong>FREE TO TRY</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Your files stay in this browser and are never uploaded."} Your draft is saved on this device.</span></div>
     {busy && <div className="busy" role="status"><LeafDrop /> {busy}</div>}
     {notice && <div className="notice" role="status"><span>{notice}</span><button aria-label="Dismiss notice" onClick={() => setNotice("")}><X size={17} /></button></div>}
@@ -443,7 +526,8 @@ export function App() {
       {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={proposalSupports} canRevise={analysis?.researchMode === "ai" && aiConsent} revise={reviseProposal} />}
       {modal === "ledger" && ledger && <><h2>Where each line came from.</h2><EvidenceLedger ledger={ledger} /></>}
       {modal === "editor" && <ResumeEditor doc={doc} save={saveEditor} />}
-      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} />}
+      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} pro={pro} openPro={openPro} />}
+      {modal === "pro" && <ProDialog pro={pro} config={lsConfig} maskedKey={proMasked} keyInput={proKeyInput} setKeyInput={setProKeyInput} busy={proBusy} error={proError} success={proSuccess} onActivate={handleProActivate} onDeactivate={handleProDeactivate} onBack={() => setModal(doc ? "finish" : null)} />}
       {modal === "opportunity" && <Opportunity meta={meta} projects={savedProjects} openProject={openSavedProject} create={() => setModal("new-opportunity")} />}
       {modal === "new-opportunity" && <><h2>Another company, same career.</h2><p>Add the role and job description. Your confirmed career answers will come along; the resume and questions will be tailored separately.</p><label>Company<input value={newOpportunity.company} onChange={(e) => setNewOpportunity({ ...newOpportunity, company: e.target.value })} placeholder="Company name" /></label><label>Target role<input value={newOpportunity.role} onChange={(e) => setNewOpportunity({ ...newOpportunity, role: e.target.value })} placeholder="Role title" /></label><label>Job description<textarea value={newOpportunity.job} onChange={(e) => setNewOpportunity({ ...newOpportunity, job: e.target.value })} placeholder="Paste the role or application questions. Add other files and links afterward." /></label><button className="primary" disabled={!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20} onClick={createOpportunity}>Build this opportunity <ArrowRight size={18} /></button></>}
       {modal === "home" && <><h2>Return to your source stack?</h2><p>Your current session stays here unless the page is refreshed.</p><button className="primary" onClick={() => { setScreen("intake"); setModal(null); }}>Return to sources</button></>}
@@ -459,8 +543,8 @@ function LeafDrop({ size = 21 }) {
   return <span className="leaf-drop" aria-hidden="true"><Leaf size={size} weight="fill" /></span>;
 }
 
-function Header({ hasDraft, hasAnything, startNew, finish, home }) {
-  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Free to try. No sign-up.</span>{hasAnything && <button className="text-action start-new" onClick={startNew}><ArrowCounterClockwise size={17} /> Start new</button>}{hasDraft && <button className="primary" onClick={finish}>Finish<span className="finish-long">&nbsp;my resume now</span></button>}</div></header>;
+function Header({ hasDraft, hasAnything, startNew, finish, home, pro, openPro }) {
+  return <header><button className="brand" onClick={home}><Leaf size={31} weight="duotone" />Career Chief</button><div className="header-right"><span className="thought">Free to try. No sign-up.</span><ProHeaderControl pro={pro} onOpen={openPro} />{hasAnything && <button className="text-action start-new" onClick={startNew}><ArrowCounterClockwise size={17} /> Start new</button>}{hasDraft && <button className="primary" onClick={finish}>Finish<span className="finish-long">&nbsp;my resume now</span></button>}</div></header>;
 }
 
 // Two very different "start over"s: a new job that keeps everything the user has
@@ -548,6 +632,6 @@ function Proposal({ doc, question, answer, proposal, setProposal, apply, manual,
 
 function ResumeEditor({ doc, save }) { const [value, setValue] = useState({ ...doc }); const fields = { name: "Name", title: "Professional title", contact: "Contact details", summary: "Professional summary", current: "Current experience", tailored: "Tailored achievement", earlier: "Earlier experience", education: "Education", skills: "Capabilities" }; return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>{Object.entries(fields).map(([key,label]) => <label key={key}>{label}{["summary","current","tailored","earlier","skills"].includes(key) ? <textarea value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} /> : <input value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} />}</label>)}<button className="primary" onClick={() => save(value)}>Save my wording <Check size={18} /></button></>; }
 
-function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} /><div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
+function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} />{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
 
 function Opportunity({ meta, projects, openProject, create }) { return <><span className="eyebrow">SEPARATE APPLICATION WORKSPACE</span><h2>One career. A different case for every company.</h2><p>Career evidence can be reused. Company research, the interview plan, and resume wording stay attached to their opportunity.</p><div className="opportunity-card current"><span>Current</span><strong>{meta.company || "Current opportunity"}</strong><p>{meta.role}</p></div>{Object.entries(projects).map(([id, project]) => <button className="opportunity-card switch" key={id} onClick={() => openProject(id)}><span>Open saved opportunity</span><strong>{project.meta.company || "Target company"}</strong><p>{project.meta.role}</p><ArrowRight size={19} /></button>)}<button className="primary" onClick={create}><Plus size={18} /> Add another company</button></>; }
