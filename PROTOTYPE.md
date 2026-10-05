@@ -53,4 +53,4 @@ Connect a server-held API key to exercise live AI research. Then add secure acco
 
 ## Validation
 
-Run `npm run build`, then `npm test` (62 tests across nine files; `npm run test:sites` runs just the hosting tests). The AI tests use a controlled response and check the no-key boundary, cited-research filter, and answer-dependent follow-up. The earlier browser checks covered PDF/DOCX/HTML ingestion, combined analysis, the seven-question plan, proposal review, direct editing, Finish Now, and all four export formats. New browser-local persistence and dynamic company switching require a final interface check after deployment.
+Run `npm run build`, then `npm test` (103 tests across eleven files; `npm run test:sites` runs just the hosting tests). The AI tests use a controlled response and check the no-key boundary, cited-research filter, and answer-dependent follow-up. The earlier browser checks covered PDF/DOCX/HTML ingestion, combined analysis, the seven-question plan, proposal review, direct editing, Finish Now, and all four export formats. New browser-local persistence and dynamic company switching require a final interface check after deployment.

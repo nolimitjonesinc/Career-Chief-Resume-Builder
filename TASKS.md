@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** October 1, 2026
+**Last updated:** October 4, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -14,8 +14,8 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] **First live run of the AI path** against a real account, behind the limits. Record the real cost of one plan and one answer check, then replace the estimated unit costs in `shared/config.mjs`. Judge whether the AI-mode questions are actually good: the "we know what to ask" pitch depends on it
 - [ ] Verify the link reader's SSRF handling on the real Worker runtime (private-address refusal, DoH reachability) and decide whether a third-party resolver is acceptable
 - [ ] Hands-on interface check of browser-local autosave and switching between company applications
-- [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser. Prerequisite for any paid tier or recurring product
-- [ ] Payments and a free/paid boundary (free: interview and preview; paid: complete resume and tailoring). Needs accounts first. Pricing numbers from outside reviews were guesses; set them after real cost per plan is known
+- [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser. No longer a prerequisite for the paid tier (the Oct 4 license-key Pro unlock is per-browser by design); still needed for cross-device drafts and any recurring product
+- [ ] Payments follow-ups (code done, dashboard live in test mode): three tiers exist (30-Day $29 / 1-Year $79 / Lifetime $149, license keys ON, activation limit 3) and the Pro dialog lists them via `VITE_LS_TIERS`. Still to do: run a test-mode purchase end to end, revoke/recreate the exposed LS API key, and complete business verification + payouts before flipping test mode off for live selling. Full checklist in `LEMON_SQUEEZY_SETUP.md`. Deliberately not built: accounts and cross-device licenses (the license is per-browser, like the draft), server-side enforcement of the gate (client-side is an honest paywall, not DRM)
 - [ ] **Cover letter** as a second finished document, built from approved answers plus sources aimed at "my future cover letter"
 - [ ] Draft resume lines straight from a deck (user approves each) instead of only through the interview
 - [ ] Prepared interview stories to finish the application package (draft screening answers already exist)
@@ -25,6 +25,7 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Nothing in flight
 
 ## Done
+- [x] Payments and a free/paid boundary via Lemon Squeezy license keys (Oct 4, 2026) — no accounts, by decision: the license lives in the browser next to the draft. Free = interview, preview, editing, analysis. Pro = finished resume exports (DOCX/PDF/HTML/TXT), gated at `downloadResume`. Three one-time tiers (30-Day $29 / 1-Year $79 / Lifetime $149), all license-keyed, listed in the Pro dialog from `VITE_LS_TIERS`. Public License API (activate/validate/deactivate) from the browser, no secret in the client; fails closed to free; revalidates at most daily. "Go Pro" in the header and the Finish dialog; deactivation in the Pro dialog. Decision: Rule 13 ("finish is always available") means finishing the interview with the on-screen working draft — finished file exports are the paid boundary. Setup checklist for Danny in `LEMON_SQUEEZY_SETUP.md`
 - [x] Safety layer: one `AI_ENABLED` gate for every runtime, origin check, per-caller and daily limits, response size cap, dev-server AI routes loopback-only, SSRF narrowed (feature branch, Oct 1, 2026)
 - [x] Evidence ledger, live role coverage, own-words interview questions, 22 themes, Compare jobs, parse check, why-this-wording, optional AI "ask for a change", homepage before/after, saved-draft versioning (feature branch, Oct 1, 2026)
 - [x] "Start new" button: new job keeping everything, or erase and start fresh; the first-screen clear link now confirms first (Sep 29, 2026)
