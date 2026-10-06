@@ -11,6 +11,7 @@ import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource,
 import { DRAFT_VERSION, isNewerDraft, migrateDraft, storageKey } from "./lib/draft";
 import { buildLedger } from "./lib/evidence";
 import { compareJobs } from "./lib/compare";
+import { splitCurrent, tailorByRules } from "./lib/tailor";
 import { EvidenceLedger, LedgerButton } from "./components/Ledger";
 import { EvidenceColumns } from "./components/Coverage";
 import { ParseCheck } from "./components/ParseCheck";
@@ -22,6 +23,7 @@ import { ProDialog, ProHeaderControl } from "./components/Pro";
 import { trimForAi } from "../shared/source-limits.mjs";
 import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
 import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
+import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 
 const blankMeta = { company: "", role: "" };
@@ -64,6 +66,8 @@ export function App() {
   const [careerBank, setCareerBank] = useState(initialDraft?.careerBank || []);
   const [newOpportunity, setNewOpportunity] = useState({ company: "", role: "", job: "" });
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiProvider, setAiProvider] = useState("openai");
+  const [tailorState, setTailorState] = useState({ status: "idle" });
   // Consent is per session (Rule 8): it is deliberately not restored from the saved draft.
   const [aiConsent, setAiConsent] = useState(false);
   // Pro license: "checking" on load, then "pro" or "free". The free tier is the
@@ -80,7 +84,7 @@ export function App() {
   const dialog = useRef(null);
   const priorFocus = useRef(null);
 
-  useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => setAiEnabled(Boolean(value.enabled))).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => { setAiEnabled(Boolean(value.enabled)); if (value.provider) setAiProvider(value.provider); }).catch(() => {}); }, []);
   // Revalidate a stored Pro license at most once a day (cached in the record).
   // Any failure fails closed: the user keeps the free tier with an explanation.
   useEffect(() => {
@@ -215,7 +219,7 @@ export function App() {
   }
 
   async function runAiPlan(nextSources, targetMeta = meta, preserveProgress = false) {
-    setBusy("Researching the company and rebuilding your hiring case…");
+    setBusy("Researching the company and rebuilding your hiring case… this takes about a minute, and your questions are held until it is done.");
     try {
       const response = await fetch("/api/ai/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ meta: targetMeta, sources: nextSources.map(trimForAi) }) });
       const result = await response.json();
@@ -287,6 +291,11 @@ export function App() {
       } catch (error) { setNotice(`${error.message} Review the editable draft wording below.`); }
       finally { setBusy(""); }
     }
+    // "No, I haven't done that" is an honest answer, not a resume line. Leave the box empty.
+    if (looksLikeGap(proposed)) {
+      proposed = "";
+      setNotice("That answer says you haven't done this, so there is nothing to put on the resume. Write a line yourself, or close this and skip the question.");
+    }
     setProposal(proposed);
     setModal("proposal");
   }
@@ -310,6 +319,37 @@ export function App() {
       setProposal(result.proposal);
       return result.note ? `Revised. ${result.note}` : "Revised. Check it before you approve.";
     } catch (error) { return `${error.message} Your wording is unchanged.`; }
+  }
+
+  // Tailor to the job: a proposal the user reviews part by part (Rules 3 and 4).
+  async function startTailor() {
+    const { header, bullets } = splitCurrent(doc.current);
+    setModal("tailor");
+    if (analysis?.researchMode === "ai" && aiConsent) {
+      setTailorState({ status: "loading" });
+      try {
+        const response = await fetch("/api/ai/tailor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, company: meta.company, summary: doc.summary, header, bullets, skills: doc.skills, answers: answers.map((item) => item.text), priorities: (analysis.requirements || []).map((item) => item.label || item.key) }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Tailoring could not finish.");
+        setTailorState({ status: "ready", mode: "ai", result });
+      } catch (error) { setTailorState({ status: "error", message: error.message }); }
+    } else {
+      const jobBlob = [jobText, ...sources.filter((item) => item.kind === "job" || item.kind === "application").map((item) => item.text)].filter(Boolean).join("\n");
+      setTailorState({ status: "ready", mode: "rules", result: tailorByRules(doc, jobBlob) });
+    }
+  }
+
+  function useSimpleTailor() {
+    const jobBlob = [jobText, ...sources.filter((item) => item.kind === "job" || item.kind === "application").map((item) => item.text)].filter(Boolean).join("\n");
+    setTailorState({ status: "ready", mode: "rules", result: tailorByRules(doc, jobBlob) });
+  }
+
+  function applyTailor(picks) {
+    const result = tailorState.result;
+    setHistory((items) => [...items, { ...doc }]);
+    setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { current: result.currentLines.join("\n") } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
+    setModal(null);
+    setNotice("Tailoring applied. Undo is under the working resume if you change your mind.");
   }
 
   function applyProposal() {
@@ -476,6 +516,8 @@ export function App() {
     window.location.reload();
   }
 
+  const researching = typeof busy === "string" && busy.startsWith("Researching");
+
   return <>
     <Header hasDraft={Boolean(doc)} hasAnything={Boolean(doc || sources.length || resumeText.trim() || jobText.trim() || meta.role.trim())} startNew={() => setModal("start-new")} finish={() => setModal("finish")} home={() => setModal("home")} pro={pro} openPro={openPro} />
     <div className="demo-strip"><strong>FREE TO TRY</strong><span>{analysis?.researchMode === "ai" ? "AI research active. Review cited findings and approve any resume change." : "Your files stay in this browser and are never uploaded."} Your draft is saved on this device.</span></div>
@@ -489,7 +531,7 @@ export function App() {
       sources={readySources} loadSample={loadSample} addFile={addFile} readJobLink={readJobLink}
       removeSource={(id) => setSources((items) => items.filter((item) => item.id !== id))}
       openSource={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}
-      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
+      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiProvider={aiProvider} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
     />}
 
     {screen === "analysis" && analysis && <AnalysisReady analysis={analysis} sources={intakeSources} open={() => { setScreen("workspace"); setTab("case"); }} />}
@@ -500,11 +542,11 @@ export function App() {
         <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span><button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
       </div>
       <nav className="workspace-nav" aria-label="Workspace">
-        {[['case','Your hiring case'],['research','Company & role'],['interview',`Interview plan · ${completed}/${questions.length}`],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>{label}</button>)}
+        {[['case','Your hiring case'],['research','Company & role'],['interview',researching ? "Interview plan · preparing…" : `Interview plan · ${completed}/${questions.length}`],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} disabled={id === "interview" && researching} onClick={() => setTab(id)}>{label}</button>)}
       </nav>
       <div className="workspace">
         <main className="main-pane">
-          {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => setTab("interview")} research={() => setTab("research")} />}
+          {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => setTab("interview")} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
           {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} answer={answer} setAnswer={setAnswer} review={reviewAnswer} skip={skipQuestion} help={help} setHelp={setHelp} sample={() => setAnswer(currentQuestion?.sample || "")} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} busy={busy} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
@@ -526,8 +568,9 @@ export function App() {
       {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={proposalSupports} canRevise={analysis?.researchMode === "ai" && aiConsent} revise={reviseProposal} />}
       {modal === "ledger" && ledger && <><h2>Where each line came from.</h2><EvidenceLedger ledger={ledger} /></>}
       {modal === "editor" && <ResumeEditor doc={doc} save={saveEditor} />}
-      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} pro={pro} openPro={openPro} />}
+      {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} tailor={startTailor} pro={pro} openPro={openPro} />}
       {modal === "pro" && <ProDialog pro={pro} config={lsConfig} maskedKey={proMasked} keyInput={proKeyInput} setKeyInput={setProKeyInput} busy={proBusy} error={proError} success={proSuccess} onActivate={handleProActivate} onDeactivate={handleProDeactivate} onBack={() => setModal(doc ? "finish" : null)} />}
+      {modal === "tailor" && doc && <Tailor doc={doc} state={tailorState} apply={applyTailor} back={() => setModal("finish")} simple={useSimpleTailor} />}
       {modal === "opportunity" && <Opportunity meta={meta} projects={savedProjects} openProject={openSavedProject} create={() => setModal("new-opportunity")} />}
       {modal === "new-opportunity" && <><h2>Another company, same career.</h2><p>Add the role and job description. Your confirmed career answers will come along; the resume and questions will be tailored separately.</p><label>Company<input value={newOpportunity.company} onChange={(e) => setNewOpportunity({ ...newOpportunity, company: e.target.value })} placeholder="Company name" /></label><label>Target role<input value={newOpportunity.role} onChange={(e) => setNewOpportunity({ ...newOpportunity, role: e.target.value })} placeholder="Role title" /></label><label>Job description<textarea value={newOpportunity.job} onChange={(e) => setNewOpportunity({ ...newOpportunity, job: e.target.value })} placeholder="Paste the role or application questions. Add other files and links afterward." /></label><button className="primary" disabled={!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20} onClick={createOpportunity}>Build this opportunity <ArrowRight size={18} /></button></>}
       {modal === "home" && <><h2>Return to your source stack?</h2><p>Your current session stays here unless the page is refreshed.</p><button className="primary" onClick={() => { setScreen("intake"); setModal(null); }}>Return to sources</button></>}
@@ -554,7 +597,7 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
   return <><h2>Start something new.</h2>{keepable && <><button className="start-choice" onClick={newJob}><strong>Apply for a different job</strong><span>Keep your resume{evidenceCount ? `, your ${evidenceCount} interview ${evidenceCount === 1 ? "answer" : "answers"}` : ""} and every document you added. This application stays saved and you can come back to it.</span><ArrowRight size={19} /></button><p className="quiet">Want a copy of this resume first? <button className="text-action" onClick={finish}>Download it</button></p></>}<div className="start-wipe"><strong>Erase everything and start from scratch</strong><p>Deletes your resume, documents, answers and every saved application from this browser. This can’t be undone.</p><button className="secondary" onClick={wipe}>Erase and start fresh</button></div></>;
 }
 
-function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {
+function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear }) {
   return <main className="intake-page">
     <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><Showcase /><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
@@ -571,7 +614,7 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}
       <button type="button" className="add-source" data-tour="more" onClick={openSource}><Plus size={19} /> Add presentations, current responsibilities, company research, CEO context, goals, or another document</button>
-      {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to OpenAI for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
+      {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to {aiProvider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"} for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
       <button className="primary wide" data-tour="go" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
       {!canBegin && <p className="form-hint">Add a resume, target role, and job description or job file to begin.</p>}
       <p className="form-hint">This browser saves your draft on this device. <button type="button" className="text-action" onClick={clear}>Clear saved draft</button></p>
@@ -598,8 +641,8 @@ function AnalysisReady({ analysis, sources, open }) {
   return <main className="analysis-page"><span className="eyebrow">The homework comes first</span><h1>Your starting point is ready.</h1><p>I read the documents together, built a first hiring case, and identified the questions most likely to improve it.</p><div className="analysis-grid">{steps.map(([title, detail], index) => <div className="analysis-step" key={title}><span>{index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div><CheckCircle size={22} weight="fill" /></div>)}</div><div className="analysis-summary"><Target size={29} /><div><small>Working thesis</small><strong>{analysis.thesis}</strong></div></div><button className="primary" onClick={open}>Open my hiring case <ArrowRight size={19} /></button><p className="quiet">{analysis.researchMode === "ai" ? "AI research is active. Review public source links and confirm personal career claims before use." : "This starting point uses the supplied material. AI web research is available when connected and selected."}</p></main>;
 }
 
-function HiringCase({ analysis, coverage, questions, sources, start, research }) {
-  return <><span className="status"><CheckCircle size={17} /> Working resume and question plan ready</span><h1>A hiring case built<br/>from the whole picture.</h1><p className="lead">{analysis.thesis}</p><div className="fit-card"><Target size={30} /><div><small>Strongest apparent fit</small><strong>{analysis.strongestFit}</strong></div></div><EvidenceColumns analysis={analysis} coverage={coverage} /><div className="case-section"><h3>What I would test before strengthening the claim</h3><p>{analysis.caution}</p><button className="text-action" onClick={research}>See every source and inference <ArrowRight size={16} /></button></div><div className="case-section"><div className="section-title"><div><h3>{questions.length} questions—not an endless interview</h3><p>Ordered by how much each answer can change the resume or hiring case.</p></div><span className="count-pill">{sources.length} sources</span></div><ol className="question-preview">{questions.slice(0, 4).map((question, index) => <li key={question.id}><span>{index + 1}</span><div><strong>{question.topic}</strong><small>{question.priority}</small></div></li>)}{questions.length > 4 && <li className="more"><span>+</span><div><strong>{questions.length - 4} more purposeful questions</strong><small>Finish anytime</small></div></li>}</ol></div><button className="primary" onClick={start}>Start with the highest-value question <ArrowRight size={19} /></button></>;
+function HiringCase({ analysis, coverage, questions, sources, start, research, researching }) {
+  return <><span className="status"><CheckCircle size={17} /> Working resume and question plan ready</span><h1>A hiring case built<br/>from the whole picture.</h1><p className="lead">{analysis.thesis}</p><div className="fit-card"><Target size={30} /><div><small>Strongest apparent fit</small><strong>{analysis.strongestFit}</strong></div></div><EvidenceColumns analysis={analysis} coverage={coverage} /><div className="case-section"><h3>What I would test before strengthening the claim</h3><p>{analysis.caution}</p><button className="text-action" onClick={research}>See every source and inference <ArrowRight size={16} /></button></div><div className="case-section"><div className="section-title"><div><h3>{questions.length} questions—not an endless interview</h3><p>Ordered by how much each answer can change the resume or hiring case.</p></div><span className="count-pill">{sources.length} sources</span></div><ol className="question-preview">{questions.slice(0, 4).map((question, index) => <li key={question.id}><span>{index + 1}</span><div><strong>{question.topic}</strong><small>{question.priority}</small></div></li>)}{questions.length > 4 && <li className="more"><span>+</span><div><strong>{questions.length - 4} more purposeful questions</strong><small>Finish anytime</small></div></li>}</ol></div><button className="primary" disabled={researching} onClick={start}>{researching ? "Researching the company… questions arrive in about a minute" : <>Start with the highest-value question <ArrowRight size={19} /></>}</button></>;
 }
 
 function Research({ analysis, sources, inspect, add }) {
@@ -632,6 +675,23 @@ function Proposal({ doc, question, answer, proposal, setProposal, apply, manual,
 
 function ResumeEditor({ doc, save }) { const [value, setValue] = useState({ ...doc }); const fields = { name: "Name", title: "Professional title", contact: "Contact details", summary: "Professional summary", current: "Current experience", tailored: "Tailored achievement", earlier: "Earlier experience", education: "Education", skills: "Capabilities" }; return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>{Object.entries(fields).map(([key,label]) => <label key={key}>{label}{["summary","current","tailored","earlier","skills"].includes(key) ? <textarea value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} /> : <input value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} />}</label>)}<button className="primary" onClick={() => save(value)}>Save my wording <Check size={18} /></button></>; }
 
-function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} />{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
+function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, tailor, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} /><div className="tailor-offer"><button className="secondary wide" onClick={tailor}>Tailor this resume to the job</button><small>{analysis?.researchMode === "ai" ? "Reorders and lightly rewords what you already wrote so the most relevant lines come first. You approve each part." : "Moves the lines this job talks about to the top. Nothing is added or reworded. You approve it first."}</small></div>{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
 
+function Tailor({ doc, state, apply, back, simple }) {
+  const [picks, setPicks] = useState({ summary: true, experience: true, skills: true });
+  if (state.status === "loading") return <><h2>Tailoring to the job…</h2><div className="thinking-inline" role="status"><LeafDrop size={19} /><span><strong>Reading your resume against the job. This takes a few seconds.</strong></span></div></>;
+  if (state.status === "error") return <><h2>Nothing was changed.</h2><p>{state.message}</p><p className="quiet">The AI is held to your own facts, so it sometimes gets turned away. You can still move the lines this job talks about to the top, with no rewording.</p><button className="primary" onClick={simple}>Use the simple reorder</button> <button className="secondary" onClick={back}>Back</button></>;
+  if (state.status !== "ready") return null;
+  const { result } = state;
+  const rows = [
+    result.summary && result.summary !== doc.summary ? { key: "summary", title: "Summary", before: doc.summary, after: result.summary } : null,
+    result.currentLines.join("\n") !== doc.current ? { key: "experience", title: "Current role, lines in a new order", before: doc.current, after: result.currentLines.join("\n") } : null,
+    result.skills && result.skills !== doc.skills ? { key: "skills", title: "Skills order", before: doc.skills, after: result.skills } : null,
+  ].filter(Boolean);
+  if (!rows.length) return <><h2>Already lined up.</h2><p>Your resume already leads with what this job asks for, so there is nothing to reorder.</p><button className="secondary" onClick={back}>Back</button></>;
+  return <><h2>Review the tailoring.</h2><p>{state.mode === "ai" ? "Your own facts and figures only. Tick what you want; nothing changes until you approve." : "Same lines, new order. Tick what you want; nothing changes until you approve."}</p>
+    {result.why?.length > 0 && <ul className="why-list">{result.why.map((line) => <li key={line}>{line}</li>)}</ul>}
+    {rows.map((row) => <div className="tailor-row" key={row.key}><label className="tailor-pick"><input type="checkbox" checked={picks[row.key]} onChange={(event) => setPicks({ ...picks, [row.key]: event.target.checked })} /> <strong>{row.title}</strong></label><div className="tailor-cols"><div><small>NOW</small>{row.before}</div><div><small>TAILORED</small>{row.after}</div></div></div>)}
+    <button className="primary" disabled={!rows.some((row) => picks[row.key])} onClick={() => apply(picks)}>Apply what I ticked <CheckCircle size={18} /></button></>;
+}
 function Opportunity({ meta, projects, openProject, create }) { return <><span className="eyebrow">SEPARATE APPLICATION WORKSPACE</span><h2>One career. A different case for every company.</h2><p>Career evidence can be reused. Company research, the interview plan, and resume wording stay attached to their opportunity.</p><div className="opportunity-card current"><span>Current</span><strong>{meta.company || "Current opportunity"}</strong><p>{meta.role}</p></div>{Object.entries(projects).map(([id, project]) => <button className="opportunity-card switch" key={id} onClick={() => openProject(id)}><span>Open saved opportunity</span><strong>{project.meta.company || "Target company"}</strong><p>{project.meta.role}</p><ArrowRight size={19} /></button>)}<button className="primary" onClick={create}><Plus size={18} /> Add another company</button></>; }
