@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** October 4, 2026
+**Last updated:** October 6, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -22,9 +22,10 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Get 10–20 real people through it and collect before/after examples and testimonials (blocked on the items above)
 
 ## Doing now
-- [ ] Nothing in flight
+- [ ] Claude Haiku provider + tailor-to-job from branch `feature/claude-haiku` (committed Oct 5, merged Oct 6). Privacy policy must name Anthropic once live
 
 ## Done
+- [x] Guided-tour copy finalized and pushed to main (Oct 2-5, 2026): "Every job gets its own resume. Updated. Custom tailored. For you." and "It tailors your evidence to the new role."
 - [x] Payments and a free/paid boundary via Lemon Squeezy license keys (Oct 4, 2026) — no accounts, by decision: the license lives in the browser next to the draft. Free = interview, preview, editing, analysis. Pro = finished resume exports (DOCX/PDF/HTML/TXT), gated at `downloadResume`. Three one-time tiers (30-Day $29 / 1-Year $79 / Lifetime $149), all license-keyed, listed in the Pro dialog from `VITE_LS_TIERS`. Public License API (activate/validate/deactivate) from the browser, no secret in the client; fails closed to free; revalidates at most daily. "Go Pro" in the header and the Finish dialog; deactivation in the Pro dialog. Decision: Rule 13 ("finish is always available") means finishing the interview with the on-screen working draft — finished file exports are the paid boundary. Setup checklist for Danny in `LEMON_SQUEEZY_SETUP.md`
 - [x] Safety layer: one `AI_ENABLED` gate for every runtime, origin check, per-caller and daily limits, response size cap, dev-server AI routes loopback-only, SSRF narrowed (feature branch, Oct 1, 2026)
 - [x] Evidence ledger, live role coverage, own-words interview questions, 22 themes, Compare jobs, parse check, why-this-wording, optional AI "ask for a change", homepage before/after, saved-draft versioning (feature branch, Oct 1, 2026)

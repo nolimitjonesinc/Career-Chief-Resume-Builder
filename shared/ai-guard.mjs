@@ -43,7 +43,7 @@ export function createMemoryStore() {
 
 const defaultStore = createMemoryStore();
 
-export const aiSwitchOn = (env = {}) => env.AI_ENABLED === "true" && Boolean(env.OPENAI_API_KEY);
+export const aiSwitchOn = (env = {}) => env.AI_ENABLED === "true" && Boolean(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY);
 
 const hostOf = (value) => { try { return new URL(value).host.toLowerCase(); } catch { return ""; } };
 
@@ -95,6 +95,6 @@ export async function readJsonLimited(response, maxBytes) {
 // The handful of settings the AI routes read, picked from any environment object
 // so each runtime adapter stays one line.
 export function aiEnvFrom(source = {}) {
-  const names = ["OPENAI_API_KEY", "AI_ENABLED", "AI_DAILY_UNIT_CAP", "AI_PER_CALLER_HOURLY", "AI_MAX_RESPONSE_BYTES", "AI_ALLOWED_ORIGINS", "OPENAI_BASE_URL"];
+  const names = ["OPENAI_API_KEY", "AI_ENABLED", "AI_DAILY_UNIT_CAP", "AI_PER_CALLER_HOURLY", "AI_MAX_RESPONSE_BYTES", "AI_ALLOWED_ORIGINS", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CAREER_AI_PROVIDER"];
   return Object.fromEntries(names.filter((name) => source[name] !== undefined).map((name) => [name, source[name]]));
 }
