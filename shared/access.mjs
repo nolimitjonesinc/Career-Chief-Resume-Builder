@@ -9,11 +9,15 @@
 //
 // The screen is a courtesy. The server check is the real lock: it is what stops
 // a stranger from spending AI credits.
-import { GuardError, createMemoryStore } from "./ai-guard.mjs";
+import { GuardError, clientIp, createMemoryStore } from "./ai-guard.mjs";
 
 export const ACCESS_HEADER = "x-access-code";
 const MAX_WRONG_PER_HOUR = 10;
-const attempts = createMemoryStore();
+// Wrong guesses are counted per caller per hour, in env.AI_LIMIT_STORE when one is
+// bound. The in-memory fallback counts per server instance, so on serverless it
+// slows a guesser rather than stopping one; bind a shared store before relying on it.
+const fallbackStore = createMemoryStore();
+const storeOf = (env) => env.AI_LIMIT_STORE || fallbackStore;
 
 export const accessCodes = (env = {}) => String(env.ACCESS_CODE || "").split(",").map((code) => code.trim()).filter(Boolean);
 export const accessRequired = (env = {}) => accessCodes(env).length > 0;
@@ -33,14 +37,23 @@ async function matches(given, env) {
   return ok;
 }
 
-const callerKey = (request) => {
-  const raw = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  return `access:wrong:${raw}:${Math.floor(Date.now() / 3_600_000)}`;
-};
+const callerKey = (request, env) => `access:wrong:${clientIp(request, env)}:${Math.floor(Date.now() / 3_600_000)}`;
 
+const lockedOut = async (request, env) => (Number(await storeOf(env).get(callerKey(request, env))) || 0) >= MAX_WRONG_PER_HOUR;
+const noteWrong = async (request, env) => {
+  const key = callerKey(request, env);
+  await storeOf(env).put(key, (Number(await storeOf(env).get(key)) || 0) + 1, 3700);
+};
+const tooMany = () => new GuardError("Too many tries. Please wait a while and try again.", 429, 3600);
+
+// Every door (the code screen, the AI routes, the link reader) shares the one
+// counter, so switching doors does not hand a guesser fresh tries.
 export async function assertAccess(request, env = {}) {
   if (!accessRequired(env)) return;
-  if (await matches(request.headers.get(ACCESS_HEADER), env)) return;
+  if (await lockedOut(request, env)) throw tooMany();
+  const given = request.headers.get(ACCESS_HEADER);
+  if (await matches(given, env)) return;
+  if (given) await noteWrong(request, env);
   throw new GuardError("This is a private preview. Enter the access code to continue.", 401);
 }
 
@@ -50,13 +63,11 @@ export async function handleAccess(request, env = {}) {
   if (request.method === "GET") return Response.json({ required: accessRequired(env) });
   if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
   if (!accessRequired(env)) return Response.json({ ok: true });
-  const key = callerKey(request);
-  const wrong = Number(await attempts.get(key)) || 0;
-  if (wrong >= MAX_WRONG_PER_HOUR) return Response.json({ error: "Too many tries. Please wait a while and try again." }, { status: 429, headers: { "retry-after": "3600" } });
+  if (await lockedOut(request, env)) return guardReply(tooMany());
   let code = "";
   try { code = String((await request.json())?.code || "").slice(0, 200); } catch { /* an empty body just fails the check */ }
   if (await matches(code, env)) return Response.json({ ok: true });
-  await attempts.put(key, wrong + 1, 3700);
+  await noteWrong(request, env);
   return Response.json({ error: "That code isn't right. Check with whoever invited you." }, { status: 401 });
 }
 

@@ -83,15 +83,15 @@ test("a caller is rate limited per hour and the day has a hard cap", async () =>
   const fetcher = async () => modelResponse(JSON.stringify({ proposal: "Did it." }));
   const body = { question: { prompt: "q" }, answer: "a" };
   const env = on({ AI_PER_CALLER_HOURLY: "2", AI_DAILY_UNIT_CAP: "3" });
-  const headers = { "x-forwarded-for": "203.0.113.5" };
+  const headers = { "cf-connecting-ip": "203.0.113.5" };
   assert.equal((await handleCareerAI(req("/api/ai/follow-up", body, headers), env, fetcher)).status, 200);
   assert.equal((await handleCareerAI(req("/api/ai/follow-up", body, headers), env, fetcher)).status, 200);
   const limited = await handleCareerAI(req("/api/ai/follow-up", body, headers), env, fetcher);
   assert.equal(limited.status, 429);
   assert.ok(limited.headers.get("retry-after"));
   // A different caller still has hourly room, but the day has one unit left, then none.
-  assert.equal((await handleCareerAI(req("/api/ai/follow-up", body, { "x-forwarded-for": "198.51.100.9" }), env, fetcher)).status, 200);
-  const spent = await handleCareerAI(req("/api/ai/follow-up", body, { "x-forwarded-for": "198.51.100.10" }), env, fetcher);
+  assert.equal((await handleCareerAI(req("/api/ai/follow-up", body, { "cf-connecting-ip": "198.51.100.9" }), env, fetcher)).status, 200);
+  const spent = await handleCareerAI(req("/api/ai/follow-up", body, { "cf-connecting-ip": "198.51.100.10" }), env, fetcher);
   assert.equal(spent.status, 429);
   assert.match((await spent.json()).error, /today/);
 });
@@ -139,7 +139,7 @@ test("OPENAI_BASE_URL redirects provider calls to a gateway", async () => {
 
 test("default limits fit one real interview: a plan, a dozen answer checks and a few rewrites", async () => {
   const env = on();
-  const headers = { "x-forwarded-for": "203.0.113.77" };
+  const headers = { "cf-connecting-ip": "203.0.113.77" };
   const plan = { meta: { company: "", role: "R" }, sources: [{ kind: "resume", text: "Alex led a team.", name: "R" }, { kind: "job", text: "Lead.", name: "J" }] };
   const fetcher = async (_u, options) => {
     const body = JSON.parse(options.body);
