@@ -5,7 +5,7 @@
 // Fail-closed contract: any validation failure, network error, or missing key
 // resolves to the free tier. The free tier is never locked out.
 
-import { LicenseClient } from "../../shared/lemonsqueezy.mjs";
+import { LicenseClient, assertLicenseMeta, computeExpiresAt, licenseConfig, matchTier } from "../../shared/lemonsqueezy.mjs";
 
 const LICENSE_KEY = "career-chief-license-v1";
 const INSTANCE_KEY = "career-chief-instance-v1";
@@ -67,11 +67,47 @@ export function licenseClient() {
   return new LicenseClient();
 }
 
+// Term expiry: a stored record carries expiresAt (ISO) once the tier is
+// known. Expired records drop to the free tier even before any network call —
+// the term genuinely ended, online or not.
+function expiryNotice(stored) {
+  const tier = stored && stored.tierName ? `${stored.tierName} ` : "";
+  let when = "";
+  try {
+    when = stored && stored.expiresAt ? new Date(stored.expiresAt).toLocaleDateString() : "";
+  } catch {
+    /* leave blank */
+  }
+  return `Your ${tier}Pro access${when ? ` ended on ${when}` : " has expired"}. Your draft is untouched — renew to keep exporting.`;
+}
+
+function isExpiredRecord(stored, nowMs = Date.now()) {
+  if (!stored || typeof stored.expiresAt !== "string" || stored.expiresAt === "") return false;
+  const at = Date.parse(stored.expiresAt);
+  return !Number.isNaN(at) && nowMs >= at;
+}
+
+function expiredResult(stored) {
+  clearStoredLicense();
+  return { state: "free", notice: expiryNotice(stored) };
+}
+
+function foreignKeyResult() {
+  clearStoredLicense();
+  return {
+    state: "free",
+    notice: "This license key belongs to a different product, so it can't unlock Career Chief Pro. Your draft is untouched.",
+  };
+}
+
 // Validate on app load. Returns { state: "pro" | "free", notice } — notice is a
 // plain-English message for the UI when the user should be told something.
-export async function validateStoredLicense(client = licenseClient()) {
+export async function validateStoredLicense(client = licenseClient(), config = null) {
   const stored = getStoredLicense();
   if (!stored) return { state: "free", notice: "" };
+  if (isExpiredRecord(stored)) return expiredResult(stored);
+
+  const cfg = config || licenseConfig();
 
   const freshEnough =
     stored.state === "pro" &&
@@ -81,7 +117,28 @@ export async function validateStoredLicense(client = licenseClient()) {
 
   const result = await client.validate(stored.licenseKey, stored.instanceId);
   if (result.ok && result.valid) {
-    writeJson(LICENSE_KEY, { ...stored, state: "pro", validatedAt: Date.now() });
+    // The public License API validates any merchant's key: confirm this one
+    // was actually sold by the Career Chief store before trusting it.
+    if (!assertLicenseMeta(result.meta, cfg).ok) return foreignKeyResult();
+    // Backfill (or refresh) the term expiry from the server's key record, so
+    // keys activated before expiry existed still end on time.
+    const expiresAt = computeExpiresAt({
+      createdAt: result.license ? result.license.createdAt : null,
+      lsExpiresAt: result.license ? result.license.expiresAt : null,
+      variantName: result.meta ? result.meta.variantName : null,
+      tiers: cfg.tiers,
+    });
+    const tier = matchTier(result.meta ? result.meta.variantName : null, cfg.tiers);
+    const next = {
+      ...stored,
+      state: "pro",
+      validatedAt: Date.now(),
+      variantName: result.meta ? result.meta.variantName : stored.variantName,
+      tierName: tier ? tier.name : stored.tierName,
+      expiresAt,
+    };
+    if (isExpiredRecord(next)) return expiredResult(next);
+    writeJson(LICENSE_KEY, next);
     return { state: "pro", notice: "" };
   }
   if (result.error && /could not reach|unreadable/i.test(result.error)) {
@@ -101,17 +158,34 @@ export async function validateStoredLicense(client = licenseClient()) {
   };
 }
 
-export async function activateLicense(rawKey, client = licenseClient()) {
+export async function activateLicense(rawKey, client = licenseClient(), config = null) {
   const result = await client.activate(rawKey, getInstanceName());
   if (!result.ok || !result.activated) {
     return { ok: false, error: result.error || "That license key could not be activated." };
   }
+  const cfg = config || licenseConfig();
+  // Same guard as validation: a key from any other Lemon Squeezy merchant
+  // activates fine on the public API — only accept this store's keys.
+  if (!assertLicenseMeta(result.meta, cfg).ok) {
+    return { ok: false, error: "This license key belongs to a different product, so it can't unlock Career Chief Pro." };
+  }
+  const variantName = result.meta ? result.meta.variantName : null;
+  const tier = matchTier(variantName, cfg.tiers);
+  const expiresAt = computeExpiresAt({
+    createdAt: result.license ? result.license.createdAt : null,
+    lsExpiresAt: result.license ? result.license.expiresAt : null,
+    variantName,
+    tiers: cfg.tiers,
+  });
   writeJson(LICENSE_KEY, {
     licenseKey: result.licenseKey,
     instanceId: result.instanceId,
     instanceName: result.instanceName,
     state: "pro",
     validatedAt: Date.now(),
+    variantName,
+    tierName: tier ? tier.name : null,
+    expiresAt,
   });
   return { ok: true, error: "" };
 }
