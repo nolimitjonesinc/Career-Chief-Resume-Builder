@@ -106,3 +106,12 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
   .tour-bubble.placed{opacity:1}
 }
 @media(max-width:650px){.tour-text{font-size:28px}.tour-controls{right:12px;bottom:12px}}
+
+.tailor-offer{margin:14px 0 6px}.tailor-offer small{display:block;margin-top:6px;color:#65716c}
+.tailor-row{border:1px solid #d8ded9;border-radius:12px;padding:14px;margin:12px 0}
+.tailor-pick{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.tailor-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tailor-cols>div{font-size:.86rem;line-height:1.45;white-space:pre-wrap}
+.tailor-cols small{display:block;color:#65716c;margin-bottom:4px;font-weight:700;letter-spacing:.05em}
+.why-list{margin:8px 0 4px;padding-left:20px;color:#3b4a44}
+@media (max-width:640px){.tailor-cols{grid-template-columns:1fr}}

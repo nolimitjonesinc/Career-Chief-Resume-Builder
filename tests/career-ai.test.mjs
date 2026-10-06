@@ -266,3 +266,73 @@ test("the wording prompt forbids gap confessions", async () => {
   await handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "q" }, answer: "a" }), claudeOn(), async (_u, options) => { system = JSON.parse(options.body).system; return claudeResponse(JSON.stringify({ proposal: "Did a thing.", followUp: null })); });
   assert.match(system, /Never put a gap, weakness or learning need into the line/);
 });
+
+// ---- Tailor to the job ----
+const tailorBody = { role: "Growth Lead", company: "Fernlight", summary: "Marketing manager with nine years in B2B SaaS.", header: "Senior Marketing Manager, Brightwave (2021 - Present)", bullets: ["Built the weekly Looker dashboard.", "Cut cost per lead 22% by moving budget to intent-based channels.", "Launched an onboarding email series that lifted trial-to-paid conversion from 14% to 17%."], skills: "Paid search, HubSpot, Looker", answers: ["I own about $600,000 a year of paid search budget."], priorities: ["paid acquisition", "lifecycle email"] };
+const tailorWith = (out) => handleCareerAI(req("/api/ai/tailor", tailorBody), claudeOn(), async () => claudeResponse(JSON.stringify(out)));
+const goodTailor = { summary: "Marketing manager with nine years in B2B SaaS who cut cost per lead 22%.", currentBullets: [{ id: 2, text: "Cut cost per lead 22% by moving budget to intent-based channels." }, { id: 3, text: "Launched an onboarding email series that lifted trial-to-paid conversion from 14% to 17%." }, { id: 1, text: "Built the weekly Looker dashboard." }], skills: "Paid search, Looker, HubSpot", why: ["Put cost per lead first because the role owns paid acquisition."] };
+
+test("tailor: a faithful reorder comes back with the header kept first", async () => {
+  const response = await tailorWith(goodTailor);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.currentLines[0], tailorBody.header);
+  assert.equal(result.currentLines.length, 4);
+  assert.match(result.currentLines[1], /cost per lead/);
+  assert.equal(result.skills, "Paid search, Looker, HubSpot");
+});
+
+test("tailor: an invented figure, a missing bullet, or a gap confession is refused whole", async () => {
+  const invented = await tailorWith({ ...goodTailor, summary: "Marketing manager who grew pipeline 300%." });
+  assert.equal(invented.status, 422);
+  assert.match((await invented.json()).error, /figure that is not in your material/);
+  const dropped = await tailorWith({ ...goodTailor, currentBullets: goodTailor.currentBullets.slice(0, 2) });
+  const doubled = await tailorWith({ ...goodTailor, currentBullets: [goodTailor.currentBullets[0], goodTailor.currentBullets[0], goodTailor.currentBullets[2]] });
+  assert.match((await doubled.json()).error, /incomplete/);
+  assert.match((await dropped.json()).error, /incomplete/);
+  const confess = await tailorWith({ ...goodTailor, summary: "Marketing manager who lacks paid social experience." });
+  assert.match((await confess.json()).error, /gaps/);
+});
+
+test("tailor: dropped skills fall back to the original list", async () => {
+  const result = await (await tailorWith({ ...goodTailor, skills: "Paid search" })).json();
+  assert.equal(result.skills, tailorBody.skills);
+});
+
+test("tailor: a bad request spends nothing", async () => {
+  const response = await handleCareerAI(req("/api/ai/tailor", { role: "x", skills: "y", bullets: [] }), claudeOn(), async () => { throw new Error("no network"); });
+  assert.equal(response.status, 422);
+});
+
+test("tailor: new skills, a bigger title, or talk of readiness to learn are all refused", async () => {
+  const addedSkill = await (await tailorWith({ ...goodTailor, skills: "Paid search, Looker, HubSpot, Budget management" })).json();
+  assert.equal(addedSkill.skills, tailorBody.skills);
+  const inflated = await tailorWith({ ...goodTailor, summary: "Marketing leader with nine years in B2B SaaS." });
+  assert.match((await inflated.json()).error, /called you a "leader"/);
+  const plan = await tailorWith({ ...goodTailor, summary: "Marketer with nine years in B2B SaaS, ready to deepen product expertise." });
+  assert.match((await plan.json()).error, /gaps or plans/);
+});
+
+test("wording: a plan or a hypothetical never becomes a resume line", async () => {
+  const send = (proposal) => handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "How would you approach it?" }, answer: "I would run customer interviews." }), claudeOn(), async () => claudeResponse(JSON.stringify({ proposal, followUp: null })));
+  assert.equal((await send("I would approach the launch with customer interviews.")).status, 422);
+  assert.equal((await send("Acknowledged a gap in pricing and committed to learning.")).status, 422);
+  assert.equal((await send("Ran 12 customer interviews a year.")).status, 200);
+});
+
+test("wording: a line full of words the answer never used is refused, and a faithful one passes", async () => {
+  const answer = "I designed and launched the onboarding email series at Brightwave. Trial-to-paid conversion went from 14% to 17% over two quarters, and I ran the A/B tests on subject lines and timing.";
+  const send = (proposal) => handleCareerAI(req("/api/ai/follow-up", { question: { prompt: "What happened?" }, answer }), claudeOn(), async () => claudeResponse(JSON.stringify({ proposal, followUp: null })));
+  const invented = await send("Lifted conversion from 14% to 17% through A/B testing; isolated email as primary driver via sequential testing with control groups across concurrent product changes.");
+  assert.equal(invented.status, 422);
+  const fine = await send("Designed and launched the onboarding email series at Brightwave, lifting trial-to-paid conversion from 14% to 17% over two quarters with A/B tests on subject lines and timing.");
+  assert.equal(fine.status, 200);
+});
+
+test("tailor: a first answer that drops a line is retried once", async () => {
+  let calls = 0;
+  const fetcher = async () => { calls += 1; return claudeResponse(JSON.stringify(calls === 1 ? { ...goodTailor, currentBullets: goodTailor.currentBullets.slice(0, 2) } : goodTailor)); };
+  const response = await handleCareerAI(req("/api/ai/tailor", tailorBody), claudeOn(), fetcher);
+  assert.equal(response.status, 200);
+  assert.equal(calls, 2);
+});

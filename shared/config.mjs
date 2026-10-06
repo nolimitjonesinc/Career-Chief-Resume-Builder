@@ -22,4 +22,4 @@ export function aiLimits(env = {}) {
   };
 }
 
-export const unitCost = { "/api/ai/plan": 10, "/api/ai/follow-up": 1, "/api/ai/revise": 1 };
+export const unitCost = { "/api/ai/plan": 10, "/api/ai/follow-up": 1, "/api/ai/revise": 1, "/api/ai/tailor": 2 };

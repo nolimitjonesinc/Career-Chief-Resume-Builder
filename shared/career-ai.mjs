@@ -2,6 +2,7 @@ import { aiTextLimit } from "./source-limits.mjs";
 import { aiLimits } from "./config.mjs";
 import { GuardError, aiSwitchOn, assertAllowedOrigin, costOf, readJsonLimited, spendOrThrow } from "./ai-guard.mjs";
 import { unsupportedNumbers } from "./claims.mjs";
+import { inflatedTitles, looksLikeGap, novelShare } from "./gaps.mjs";
 import { readTextLimited } from "./limited-read.mjs";
 
 const API = "https://api.openai.com/v1/responses";
@@ -149,7 +150,7 @@ async function askClaude(body, key, fetchImpl, maxBytes = aiLimits().maxResponse
   const timeout = setTimeout(() => controller.abort(), 90_000);
   const request = {
     model: CLAUDE_MODEL, max_tokens: 6000, system: body.instructions,
-    ...(body.tools ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] } : {}),
+    ...(body.tools ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] } : {}),
   };
   const messages = [{ role: "user", content: body.input }];
   const texts = [];
@@ -234,19 +235,21 @@ async function createPlan(payload, auth, fetchImpl, maxBytes) {
 async function followUp(payload, auth, fetchImpl, maxBytes) {
   const { data } = await ask(auth, {
     model: MODELS.drafting, store: false,
-    instructions: `${instructions} The candidate's answer is user-supplied, not independently verified. Preserve their personal contribution accurately. Never add a number absent from their answer. RESUME LINE RULES: write only what the candidate actually DID, as one confident past-tense achievement sentence under 300 characters. Never put a gap, weakness or learning need into the line: no \"did not\", \"lacks\", \"no experience\", \"development area\", \"learning area\", \"unproven\". If part of the answer says they have not done something, leave that part out completely. Do not tie the line to the target role with phrases like \"relevant to\" or \"readiness for\"; just state the work. Use only figures from the answer. If the answer contains nothing they did, return an empty proposal string. FOLLOW-UP RULES: a follow-up is expensive, so ask one only when the answer leaves a gap that genuinely blocks a truthful resume line. When you do ask, ask the ONE question that closes the whole gap at once - request every missing piece together in a single question rather than splitting it across several turns. Never re-ask ground already covered by askedTopics or the prior answers, and never restate the same question in different words. If this topic has already produced a follow-up, or the remaining gap is a detail rather than a blocker, return null and let an untouched aspect of the candidate's case get its turn instead. Output JSON only.`,
+    instructions: `${instructions} The candidate's answer is user-supplied, not independently verified. Preserve their personal contribution accurately. Never add a number absent from their answer. RESUME LINE RULES: write only what the candidate actually DID, as one confident past-tense achievement sentence under 300 characters. Never put a gap, weakness or learning need into the line: no \"did not\", \"lacks\", \"no experience\", \"development area\", \"learning area\", \"unproven\". If part of the answer says they have not done something, leave that part out completely. Do not tie the line to the target role with phrases like \"relevant to\" or \"readiness for\"; just state the work. Use only figures from the answer. Every action in the line must come from the answer itself: never add activities, audits, workshops, materials, programs or methods the answer does not state. If the answer describes what they would do, plan to do, or are willing to do, rather than something they actually did, or contains nothing they did, return an empty proposal string. FOLLOW-UP RULES: a follow-up is expensive, so ask one only when the answer leaves a gap that genuinely blocks a truthful resume line. When you do ask, ask the ONE question that closes the whole gap at once - request every missing piece together in a single question rather than splitting it across several turns. Never re-ask ground already covered by askedTopics or the prior answers, and never restate the same question in different words. If this topic has already produced a follow-up, or the remaining gap is a detail rather than a blocker, return null and let an untouched aspect of the candidate's case get its turn instead. Output JSON only.`,
     input: `Given this candidate answer, output JSON keys proposal (one resume achievement sentence supported by the answer, no placeholders), followUp (object with topic,prompt,why,tip, or null when no follow-up is warranted). askedTopics lists what has already been put to the candidate and pendingTopics lists what is still queued - a follow-up must not duplicate either, and must not revisit a topic that already appears more than once in askedTopics.\n${JSON.stringify({ role: payload.role, question: payload.question, answer: payload.answer, askedTopics: payload.askedTopics?.slice(0, 20), pendingTopics: payload.pendingTopics?.slice(0, 20), priorAnswers: payload.priorAnswers?.slice(-4) })}`,
     text: { format: { type: "json_object" } },
   }, fetchImpl, maxBytes);
-  const proposal = cleanLine(data.proposal);
+  const proposal = faithful(cleanLine(data.proposal), supportTexts(payload));
   if (!proposal) throw new Error("No supported resume wording was returned. Your answer is still available to edit.");
   const next = data.followUp?.prompt ? normalizeQuestion(data.followUp, Date.now()) : null;
   return { proposal, followUp: next, unsupportedNumbers: unsupportedNumbers(proposal, supportTexts(payload)) };
 }
 
 // A resume line must never confess a gap. The prompt says so; this is the backstop when it slips.
-const CONFESSION = /development area|learning area|requires? new learning|\bunproven\b|\blacks?\b|\bdid not\b|\bhave not\b|\bhas not\b|\bhaven't\b|no direct experience|\bremains? (?:a )?gap\b/i;
-const cleanLine = (text) => { const line = String(text || "").trim().slice(0, 650); return CONFESSION.test(line) ? "" : line; };
+const cleanLine = (text) => { const line = String(text || "").trim().slice(0, 650); return looksLikeGap(line) ? "" : line; };
+// ...and it must not invent: if too many of its words appear nowhere in what the person said, refuse it.
+export const MAX_NOVEL = 0.35;
+const faithful = (line, support) => (line && novelShare(line, support) > MAX_NOVEL ? "" : line);
 
 // Everything the candidate has said that a figure could legitimately come from.
 const supportTexts = (payload) => [payload.answer, ...(payload.priorAnswers || []).map((item) => (typeof item === "string" ? item : item?.text)), payload.current].filter(Boolean).map(String);
@@ -256,23 +259,63 @@ const supportTexts = (payload) => [payload.answer, ...(payload.priorAnswers || [
 async function revise(payload, auth, fetchImpl, maxBytes) {
   const { data } = await ask(auth, {
     model: MODELS.drafting, store: false,
-    instructions: `${instructions} You are revising ONE resume line at the candidate's request. The request changes tone, length or emphasis only. RESUME LINE RULES: write only what the candidate actually DID, as one confident past-tense achievement sentence under 300 characters. Never put a gap, weakness or learning need into the line: no \"did not\", \"lacks\", \"no experience\", \"development area\", \"learning area\", \"unproven\". If part of the answer says they have not done something, leave that part out completely. Do not tie the line to the target role with phrases like \"relevant to\" or \"readiness for\"; just state the work. Use only figures from the answer. If the answer contains nothing they did, return an empty proposal string. Do not add any fact, number, title, team size or result that is not in the candidate's answer or prior answers. If the request asks for something the evidence cannot support, keep the line truthful and say so in note. Output JSON only.`,
+    instructions: `${instructions} You are revising ONE resume line at the candidate's request. The request changes tone, length or emphasis only. RESUME LINE RULES: write only what the candidate actually DID, as one confident past-tense achievement sentence under 300 characters. Never put a gap, weakness or learning need into the line: no \"did not\", \"lacks\", \"no experience\", \"development area\", \"learning area\", \"unproven\". If part of the answer says they have not done something, leave that part out completely. Do not tie the line to the target role with phrases like \"relevant to\" or \"readiness for\"; just state the work. Use only figures from the answer. Every action in the line must come from the answer itself: never add activities, audits, workshops, materials, programs or methods the answer does not state. If the answer describes what they would do, plan to do, or are willing to do, rather than something they actually did, or contains nothing they did, return an empty proposal string. Do not add any fact, number, title, team size or result that is not in the candidate's answer or prior answers. If the request asks for something the evidence cannot support, keep the line truthful and say so in note. Output JSON only.`,
     input: `Output JSON keys proposal (the revised single resume line, no placeholders) and note (one short sentence on what changed, or why part of the request was not done).\n${JSON.stringify({ role: payload.role, answer: payload.answer, priorAnswers: payload.priorAnswers?.slice(-4), currentLine: payload.current, request: String(payload.instruction).slice(0, 300) })}`,
     text: { format: { type: "json_object" } },
   }, fetchImpl, maxBytes);
-  const proposal = cleanLine(data.proposal);
+  const proposal = faithful(cleanLine(data.proposal), supportTexts(payload));
   if (!proposal) throw new Error("No revised wording was returned. Your current wording is unchanged.");
   return { proposal, note: String(data.note || "").slice(0, 240), unsupportedNumbers: unsupportedNumbers(proposal, supportTexts(payload)) };
+}
+
+// "Tailor to the job": reorder and lightly reword what the candidate already wrote.
+// Anything that adds a figure, drops a line, or confesses a gap is refused whole,
+// so the page never has to trust the model (Rules 2 and 3).
+async function tailor(payload, auth, fetchImpl, maxBytes) {
+  const attempt = () => ask(auth, {
+    model: MODELS.drafting, store: false,
+    instructions: `${instructions} You are tailoring ONE existing resume to ONE job. You may only (1) rewrite the summary, (2) put the current-role bullets in the order that serves this job best and reword them lightly for clarity and emphasis, and (3) reorder the skills. Use only facts and figures already in the candidate's resume sections and answers; never add a figure, title, tool, employer, date, team size or result. Never mention a gap, weakness or what the candidate lacks. Every existing bullet must appear exactly once. Write the summary as at most 2 confident sentences under 350 characters in the candidate's own voice, with no phrases like "relevant to" or "seeking". Output JSON only.`,
+    input: `Output JSON keys summary (string), currentBullets (array of objects {id, text}: every supplied id exactly once, most relevant first), skills (string, exactly the same skills, only reordered, same separators), why (array of at most 4 short plain sentences about what moved and why; never mention gaps). Keep the candidate's real job function and level: do not call them a leader, director, head or operations expert unless their own words do.\n${JSON.stringify({ role: payload.role, company: payload.company, jobPriorities: payload.priorities?.slice(0, 12), summary: payload.summary, currentRoleHeader: payload.header, currentBullets: payload.bullets.map((text, index) => ({ id: index + 1, text })), skills: payload.skills, candidateAnswers: payload.answers?.slice(-12) })}`,
+    text: { format: { type: "json_object" } },
+  }, fetchImpl, maxBytes);
+  const intact = (result) => { const list = Array.isArray(result.data?.currentBullets) ? result.data.currentBullets : []; const ids = list.map((item) => Number(item?.id)); return list.length === payload.bullets.length && payload.bullets.every((_, index) => ids.includes(index + 1)) && new Set(ids).size === ids.length; };
+  // Models occasionally drop or merge a line; one more try is cheap, a refusal is not.
+  let { data } = await attempt();
+  if (!intact({ data })) ({ data } = await attempt());
+  const returned = Array.isArray(data.currentBullets) ? data.currentBullets : [];
+  const ids = returned.map((item) => Number(item?.id));
+  const complete = returned.length === payload.bullets.length && payload.bullets.every((_, index) => ids.includes(index + 1)) && new Set(ids).size === ids.length;
+  if (!complete) throw new Error("The tailored version came back incomplete, so nothing was changed.");
+  const bullets = returned.map((item) => String(item.text || "").trim().slice(0, 450));
+  if (bullets.some((line) => !line)) throw new Error("The tailored version came back incomplete, so nothing was changed.");
+  const summary = String(data.summary || "").trim().slice(0, 450);
+  const originalSkills = String(payload.skills || "");
+  const skillItems = (text) => text.split(/\s*[,·|;•]\s*/).map((item) => item.trim().toLowerCase()).filter(Boolean).sort();
+  const sameSkills = JSON.stringify(skillItems(originalSkills)) === JSON.stringify(skillItems(String(data.skills || "")));
+  const skills = sameSkills ? String(data.skills).trim().slice(0, 450) : originalSkills;
+  const all = [summary, ...bullets, skills].join("\n");
+  // The person's own résumé words may mention a gap; only NEW talk of gaps is refused.
+  // Their interview answers are not an allowance: they are where admissions live.
+  const own = [payload.summary, payload.header, payload.skills, ...payload.bullets].filter(Boolean).map(String);
+  const support = [...own, ...(payload.answers || [])].filter(Boolean).map(String);
+  if (looksLikeGap(all) && !looksLikeGap(own.join("\n"))) throw new Error("The tailored version talked about gaps or plans, so nothing was changed.");
+  const inflated = inflatedTitles(all, support);
+  if (inflated.length) throw new Error(`The tailored version called you a "${inflated[0]}", which your material does not, so nothing was changed.`);
+  const stray = unsupportedNumbers(all, support);
+  if (stray.length) throw new Error(`The tailored version added a figure that is not in your material (${stray.slice(0, 3).join(", ")}), so nothing was changed.`);
+  return { summary: summary || null, currentLines: [...(payload.header ? [payload.header] : []), ...bullets], skills, why: (Array.isArray(data.why) ? data.why : []).slice(0, 4).map((item) => String(item).slice(0, 220)) };
 }
 
 const priorOk = (value) => value === undefined || (Array.isArray(value) && value.every((item) => isText(item) || (isObject(item) && (item.text === undefined || isText(item.text)))));
 const common = (p) => isObject(p) && (p.role === undefined || isText(p.role)) && priorOk(p.priorAnswers) && JSON.stringify(p).length <= MAX_INPUT;
 const followUpOk = (p) => common(p) && isText(p.answer) && p.answer.trim() && isObject(p.question) && isText(p.question.prompt) && p.question.prompt && [p.askedTopics, p.pendingTopics].every((v) => v === undefined || isTextList(v));
+const tailorOk = (p) => common(p) && isText(p.role) && isText(p.skills) && isTextList(p.bullets) && p.bullets.length > 0 && p.bullets.length <= 30 && [p.summary, p.header, p.company].every((v) => v === undefined || isText(v)) && [p.answers, p.priorities].every((v) => v === undefined || isTextList(v));
 const reviseOk = (p) => common(p) && [p.answer, p.current, p.instruction].every((v) => isText(v) && v.trim());
 
 const routes = {
   "/api/ai/plan": { validate: (payload) => validPayload(payload), run: createPlan },
   "/api/ai/follow-up": { validate: (payload) => { if (!followUpOk(payload)) throw new Error(BAD); }, run: followUp },
+  "/api/ai/tailor": { validate: (payload) => { if (!tailorOk(payload)) throw new Error(BAD); }, run: tailor },
   "/api/ai/revise": { validate: (payload) => { if (!reviseOk(payload)) throw new Error(BAD); }, run: revise },
 };
 
