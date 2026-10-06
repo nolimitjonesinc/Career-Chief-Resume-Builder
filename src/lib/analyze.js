@@ -98,6 +98,46 @@ export function coverageFor(sources, answerTexts = []) {
   return evaluateRequirements(role, career);
 }
 
+// Real resumes carry their own section headings. When they are there, honour them:
+// keep the person's own summary, skills and education instead of replacing them.
+const SECTION_HEADINGS = [
+  ["summary", /^(professional |career |executive )?(summary|profile|objective)$|^about( me)?$/i],
+  ["experience", /^((professional|work|relevant|career) )?experience$|^(employment|work|career)( history)?$/i],
+  ["education", /^education( (and|&) (training|certifications?))?$/i],
+  ["skills", /^((core|key|technical|professional) )?(skills|competencies)$|^(skills (and|&) tools|capabilities|expertise)$/i],
+  ["other", /^(certifications?|licenses?|projects?|awards?( (and|&) honou?rs)?|publications?|volunteer(ing)?( experience)?|languages|interests)$/i],
+];
+const headingOf = (line) => {
+  const label = line.replace(/[:\s]+$/, "").trim();
+  if (label.length > 40) return null;
+  return SECTION_HEADINGS.find(([, pattern]) => pattern.test(label))?.[0] || null;
+};
+const DATE_RANGE = /(?:\b(?:19|20)\d{2}\b|present|current)\s*(?:[-–—]|to)\s*(?:\b(?:19|20)\d{2}\b|present|current)/i;
+
+// Returns null when the resume has no experience heading, so the old guess-by-halves path still applies.
+function splitSections(bodyLines) {
+  const found = { summary: [], experience: [], education: [], skills: [], other: [] };
+  let at = null;
+  let sawExperience = false;
+  for (const line of bodyLines) {
+    const heading = headingOf(line);
+    if (heading) { at = heading; if (heading === "experience") sawExperience = true; if (heading === "other") found.other.push(line.replace(/[:\s]+$/, "").toUpperCase()); continue; }
+    if (at) found[at].push(line);
+  }
+  if (!sawExperience || !found.experience.length) return null;
+  return found;
+}
+
+function roleBlocks(lines) {
+  const blocks = [];
+  for (const line of lines) {
+    if (DATE_RANGE.test(line) && line.length < 160) blocks.push([line]);
+    else if (blocks.length) blocks.at(-1).push(line);
+    else blocks.push([line]);
+  }
+  return blocks;
+}
+
 function makeDoc(resumeText, role, candidateContext = "") {
   const lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const name = lines[0] || "Your name";
@@ -105,25 +145,34 @@ function makeDoc(resumeText, role, candidateContext = "") {
   const contactIndex = lines.findIndex((line) => /@|linkedin|\d{3}[-.) ]\d{3}/i.test(line));
   const contact = contactIndex > 1 ? lines[contactIndex] : "Contact details";
   const bodyLines = lines.slice(contactIndex > 1 ? contactIndex + 1 : 2);
-  const educationLine = lines.find((line) => /^\s*education\b|^\s*(BA|BS|B\.A\.|B\.S\.|MBA|MA|MS|PhD)\b|university|college/i.test(line)) || "Education";
-  const careerLines = bodyLines.filter((line) => line !== educationLine);
-  const splitAt = Math.min(careerLines.length, Math.max(2, Math.ceil(careerLines.length / 2)));
-  const currentText = careerLines.slice(0, splitAt).join("\n");
-  const earlierText = careerLines.slice(splitAt).join("\n");
   const suppliedAccomplishment = candidateContext.split(/(?<=[.!?])\s+/)[0]?.trim();
   const firstName = name.split(/\s+/)[0];
   const candidateLine = suppliedAccomplishment?.replace(new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+`, "i"), "") || "";
-  const firstCareerSentence = currentText.split(/(?<=[.!?])\s+/).find((line) => /\b(led|built|created|directed|developed|managed|launched|improved)\b/i.test(line)) || currentText;
-  const tailored = candidateLine || firstCareerSentence || "Add an accomplishment supported by your career history.";
-  return {
-    name, title, contact,
-    summary: role ? `${title} with experience relevant to ${role}. Brings cross-functional leadership, audience understanding, and evidence-led storytelling.` : `${title} with cross-functional leadership and evidence-led storytelling experience.`,
-    current: currentText || "Add your most recent role and accomplishments.",
-    tailored: tailored.charAt(0).toUpperCase() + tailored.slice(1).replace(/[.\s]+$/, "") + ".",
-    earlier: earlierText || "Add earlier roles that strengthen this case.",
-    education: educationLine,
-    skills: "Leadership · Strategy · Storytelling · Cross-functional collaboration",
+  const sections = splitSections(bodyLines);
+  const cannedSummary = role ? `${title} with experience relevant to ${role}. Brings cross-functional leadership, audience understanding, and evidence-led storytelling.` : `${title} with cross-functional leadership and evidence-led storytelling experience.`;
+  const cannedSkills = "Leadership · Strategy · Storytelling · Cross-functional collaboration";
+  const finish = (currentText, earlierText, extras) => {
+    const firstCareerSentence = currentText.split(/(?<=[.!?])\s+/).find((line) => /\b(led|built|created|directed|developed|managed|launched|improved)\b/i.test(line)) || currentText;
+    const tailored = candidateLine || firstCareerSentence || "Add an accomplishment supported by your career history.";
+    return {
+      name, title, contact,
+      summary: extras.summary || cannedSummary,
+      current: currentText || "Add your most recent role and accomplishments.",
+      tailored: tailored.charAt(0).toUpperCase() + tailored.slice(1).replace(/[.\s]+$/, "") + ".",
+      earlier: earlierText || "Add earlier roles that strengthen this case.",
+      education: extras.education || "Education",
+      skills: extras.skills || cannedSkills,
+    };
   };
+  if (sections) {
+    const blocks = roleBlocks(sections.experience);
+    const earlier = [...blocks.slice(1).flat(), ...sections.other].join("\n");
+    return finish(blocks[0].join("\n"), earlier, { summary: sections.summary.join(" "), education: sections.education.join("; "), skills: sections.skills.join(" ") });
+  }
+  const educationLine = lines.find((line) => /^\s*education\b|^\s*(BA|BS|B\.A\.|B\.S\.|MBA|MA|MS|PhD)\b|university|college/i.test(line)) || "Education";
+  const careerLines = bodyLines.filter((line) => line !== educationLine);
+  const splitAt = Math.min(careerLines.length, Math.max(2, Math.ceil(careerLines.length / 2)));
+  return finish(careerLines.slice(0, splitAt).join("\n"), careerLines.slice(splitAt).join("\n"), { education: educationLine });
 }
 
 // Presentations show the work; the user decides what to claim from it. One

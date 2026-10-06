@@ -61,6 +61,7 @@ export function App() {
   const [careerBank, setCareerBank] = useState(initialDraft?.careerBank || []);
   const [newOpportunity, setNewOpportunity] = useState({ company: "", role: "", job: "" });
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiProvider, setAiProvider] = useState("openai");
   // Consent is per session (Rule 8): it is deliberately not restored from the saved draft.
   const [aiConsent, setAiConsent] = useState(false);
   const [pendingFollowUp, setPendingFollowUp] = useState(null);
@@ -68,7 +69,7 @@ export function App() {
   const dialog = useRef(null);
   const priorFocus = useRef(null);
 
-  useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => setAiEnabled(Boolean(value.enabled))).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/ai/status").then((result) => result.json()).then((value) => { setAiEnabled(Boolean(value.enabled)); if (value.provider) setAiProvider(value.provider); }).catch(() => {}); }, []);
   useEffect(() => {
     if (savedByNewer) return;
     try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, draftVersion: DRAFT_VERSION })); }
@@ -406,7 +407,7 @@ export function App() {
       sources={readySources} loadSample={loadSample} addFile={addFile} readJobLink={readJobLink}
       removeSource={(id) => setSources((items) => items.filter((item) => item.id !== id))}
       openSource={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}
-      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
+      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiProvider={aiProvider} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
     />}
 
     {screen === "analysis" && analysis && <AnalysisReady analysis={analysis} sources={intakeSources} open={() => { setScreen("workspace"); setTab("case"); }} />}
@@ -470,7 +471,7 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
   return <><h2>Start something new.</h2>{keepable && <><button className="start-choice" onClick={newJob}><strong>Apply for a different job</strong><span>Keep your resume{evidenceCount ? `, your ${evidenceCount} interview ${evidenceCount === 1 ? "answer" : "answers"}` : ""} and every document you added. This application stays saved and you can come back to it.</span><ArrowRight size={19} /></button><p className="quiet">Want a copy of this resume first? <button className="text-action" onClick={finish}>Download it</button></p></>}<div className="start-wipe"><strong>Erase everything and start from scratch</strong><p>Deletes your resume, documents, answers and every saved application from this browser. This can’t be undone.</p><button className="secondary" onClick={wipe}>Erase and start fresh</button></div></>;
 }
 
-function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiConsent, setAiConsent, clear }) {
+function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear }) {
   return <main className="intake-page">
     <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><Showcase /><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
@@ -487,7 +488,7 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}
       <button type="button" className="add-source" data-tour="more" onClick={openSource}><Plus size={19} /> Add presentations, current responsibilities, company research, CEO context, goals, or another document</button>
-      {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to OpenAI for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
+      {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to {aiProvider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"} for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
       <button className="primary wide" data-tour="go" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
       {!canBegin && <p className="form-hint">Add a resume, target role, and job description or job file to begin.</p>}
       <p className="form-hint">This browser saves your draft on this device. <button type="button" className="text-action" onClick={clear}>Clear saved draft</button></p>

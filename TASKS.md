@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** October 1, 2026
+**Last updated:** October 5, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -16,15 +16,17 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Hands-on interface check of browser-local autosave and switching between company applications
 - [ ] Accounts and cross-device storage so a career evidence bank isn't trapped in one browser. Prerequisite for any paid tier or recurring product
 - [ ] Payments and a free/paid boundary (free: interview and preview; paid: complete resume and tailoring). Needs accounts first. Pricing numbers from outside reviews were guesses; set them after real cost per plan is known
+  - Oct 5: Danny is filling out a Lemon Squeezy business form. A product description was drafted (nothing built or changed in the app). Pricing model not chosen yet ‹CHECK›. Next: draft the other form fields (business type, website, refund policy) if asked
 - [ ] **Cover letter** as a second finished document, built from approved answers plus sources aimed at "my future cover letter"
 - [ ] Draft resume lines straight from a deck (user approves each) instead of only through the interview
 - [ ] Prepared interview stories to finish the application package (draft screening answers already exist)
 - [ ] Get 10–20 real people through it and collect before/after examples and testimonials (blocked on the items above)
 
 ## Doing now
-- [ ] Nothing in flight
+- [ ] Claude Haiku provider is built and live-tested on branch `feature/claude-haiku` (not merged, not committed). Next: stop AI lines that confess gaps into the resume, fix the mangled resume sections, then re-run 3 jobs
 
 ## Done
+- [x] Guided-tour copy finalized and pushed to main (Oct 2-5, 2026): "Every job gets its own resume. Updated. Custom tailored. For you." and "It tailors your evidence to the new role." Still unchecked: Vercel deploy shows Ready, and the longer first bubble on a phone ‹CHECK›
 - [x] Safety layer: one `AI_ENABLED` gate for every runtime, origin check, per-caller and daily limits, response size cap, dev-server AI routes loopback-only, SSRF narrowed (feature branch, Oct 1, 2026)
 - [x] Evidence ledger, live role coverage, own-words interview questions, 22 themes, Compare jobs, parse check, why-this-wording, optional AI "ask for a change", homepage before/after, saved-draft versioning (feature branch, Oct 1, 2026)
 - [x] "Start new" button: new job keeping everything, or erase and start fresh; the first-screen clear link now confirms first (Sep 29, 2026)
