@@ -25,6 +25,7 @@ import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
 import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
 import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
+import { blankJob, starterReady, starterResumeText } from "./lib/starter";
 
 const blankMeta = { company: "", role: "" };
 const blankSource = { kind: "current", focus: "auto", mode: "text", name: "", text: "", url: "", parsedFile: null };
@@ -531,7 +532,7 @@ export function App() {
       sources={readySources} loadSample={loadSample} addFile={addFile} readJobLink={readJobLink}
       removeSource={(id) => setSources((items) => items.filter((item) => item.id !== id))}
       openSource={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}
-      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiProvider={aiProvider} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")}
+      begin={beginAnalysis} canBegin={hasResume && hasOpportunity} busy={Boolean(busy)} aiEnabled={aiEnabled} aiProvider={aiProvider} aiConsent={aiConsent} setAiConsent={setAiConsent} clear={() => setModal("clear")} startResume={() => setModal("starter")}
     />}
 
     {screen === "analysis" && analysis && <AnalysisReady analysis={analysis} sources={intakeSources} open={() => { setScreen("workspace"); setTab("case"); }} />}
@@ -573,6 +574,7 @@ export function App() {
       {modal === "tailor" && doc && <Tailor doc={doc} state={tailorState} apply={applyTailor} back={() => setModal("finish")} simple={useSimpleTailor} />}
       {modal === "opportunity" && <Opportunity meta={meta} projects={savedProjects} openProject={openSavedProject} create={() => setModal("new-opportunity")} />}
       {modal === "new-opportunity" && <><h2>Another company, same career.</h2><p>Add the role and job description. Your confirmed career answers will come along; the resume and questions will be tailored separately.</p><label>Company<input value={newOpportunity.company} onChange={(e) => setNewOpportunity({ ...newOpportunity, company: e.target.value })} placeholder="Company name" /></label><label>Target role<input value={newOpportunity.role} onChange={(e) => setNewOpportunity({ ...newOpportunity, role: e.target.value })} placeholder="Role title" /></label><label>Job description<textarea value={newOpportunity.job} onChange={(e) => setNewOpportunity({ ...newOpportunity, job: e.target.value })} placeholder="Paste the role or application questions. Add other files and links afterward." /></label><button className="primary" disabled={!newOpportunity.role.trim() || newOpportunity.job.trim().length < 20} onClick={createOpportunity}>Build this opportunity <ArrowRight size={18} /></button></>}
+      {modal === "starter" && <StarterResume done={(text) => { setResumeText(text); setModal(null); setNotice("Your starter resume is in the box. Add the job you want and press Analyze. Career Chief will help you strengthen it from there."); }} />}
       {modal === "home" && <><h2>Return to your source stack?</h2><p>Your current session stays here unless the page is refreshed.</p><button className="primary" onClick={() => { setScreen("intake"); setModal(null); }}>Return to sources</button></>}
       {modal === "start-new" && <StartNew keepable={Boolean(analysis && doc)} evidenceCount={careerBank.length} newJob={() => setModal("new-opportunity")} finish={() => setModal("finish")} wipe={clearLocalDraft} />}
       {modal === "clear" && <><h2>Clear this device’s draft?</h2><p>This deletes the saved career material, sources, answers, and resume from this browser. Download anything you need first.</p><button className="secondary" onClick={() => setModal(null)}>Keep my draft</button><button className="primary" onClick={clearLocalDraft}>Clear draft</button></>}
@@ -597,7 +599,7 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
   return <><h2>Start something new.</h2>{keepable && <><button className="start-choice" onClick={newJob}><strong>Apply for a different job</strong><span>Keep your resume{evidenceCount ? `, your ${evidenceCount} interview ${evidenceCount === 1 ? "answer" : "answers"}` : ""} and every document you added. This application stays saved and you can come back to it.</span><ArrowRight size={19} /></button><p className="quiet">Want a copy of this resume first? <button className="text-action" onClick={finish}>Download it</button></p></>}<div className="start-wipe"><strong>Erase everything and start from scratch</strong><p>Deletes your resume, documents, answers and every saved application from this browser. This can’t be undone.</p><button className="secondary" onClick={wipe}>Erase and start fresh</button></div></>;
 }
 
-function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear }) {
+function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear, startResume }) {
   return <main className="intake-page">
     <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><Showcase /><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
@@ -605,6 +607,7 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       <SourceBlock icon={<FileText size={22} />} title="Your resume" tour="resume" required note="PDF, Word, HTML, TXT or pasted text">
         <textarea value={resumeText} onChange={(event) => setResumeText(event.target.value)} placeholder="Paste the resume here, or upload the original file below." />
         <label className="upload-control"><UploadSimple size={17} /> Upload resume<input type="file" accept={acceptedFiles} onChange={(event) => addFile(event.target.files[0], "resume")} /></label>
+        {!resumeText.trim() && <button type="button" className="text-action no-resume" onClick={startResume}>I don't have a resume. Help me write one <ArrowRight size={16} /></button>}
       </SourceBlock>
       <div className="two-fields"><label>Target company<input value={meta.company} onChange={(event) => setMeta({ ...meta, company: event.target.value })} placeholder="Company name" /></label><label>Target role<input value={meta.role} onChange={(event) => setMeta({ ...meta, role: event.target.value })} placeholder="Role title" required /></label></div>
       <SourceBlock icon={<Target size={22} />} title="The opportunity" tour="job" required note="Job posting, application questions, or role brief">
@@ -620,6 +623,27 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       <p className="form-hint">This browser saves your draft on this device. <button type="button" className="text-action" onClick={clear}>Clear saved draft</button></p>
     </form>
   </main>;
+}
+
+function StarterResume({ done }) {
+  const [form, setForm] = useState({ name: "", headline: "", contact: "", education: "", skills: "", jobs: [blankJob()] });
+  const setJob = (index, patch) => setForm({ ...form, jobs: form.jobs.map((job, i) => i === index ? { ...job, ...patch } : job) });
+  return <><h2>Let's build your first resume.</h2><p>Type it the way you'd tell a friend. Rough is fine. Everything stays your words, and Career Chief helps you sharpen it next.</p>
+    <div className="two-fields"><label>Your name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="First and last name" /></label><label>Job title you go by<input value={form.headline} onChange={(e) => setForm({ ...form, headline: e.target.value })} placeholder="e.g. Operations Manager" /></label></div>
+    <label>Email and phone<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="you@email.com | (555) 555-5555" /></label>
+    <h3 className="starter-jobs">Jobs you've had, newest first</h3>
+    {form.jobs.map((job, index) => <section className="starter-job" key={index}>
+      <div className="two-fields"><label>Job title<input value={job.title} onChange={(e) => setJob(index, { title: e.target.value })} placeholder="What they called you" /></label><label>Company<input value={job.company} onChange={(e) => setJob(index, { company: e.target.value })} placeholder="Where" /></label></div>
+      <div className="two-fields"><label>Start year<input value={job.start} onChange={(e) => setJob(index, { start: e.target.value })} placeholder="2021" /></label><label>End year<input value={job.end} onChange={(e) => setJob(index, { end: e.target.value })} placeholder="Leave empty if it's current" /></label></div>
+      <label>What you did there<textarea value={job.did} onChange={(e) => setJob(index, { did: e.target.value })} placeholder="One thing per line. What you ran, built, fixed or looked after. Use your own numbers only if you know them." /></label>
+      {form.jobs.length > 1 && <button type="button" className="text-action" onClick={() => setForm({ ...form, jobs: form.jobs.filter((_, i) => i !== index) })}>Remove this job</button>}
+    </section>)}
+    <button type="button" className="add-source" onClick={() => setForm({ ...form, jobs: [...form.jobs, blankJob()] })}><Plus size={19} /> Add another job</button>
+    <label>School or training (optional)<textarea value={form.education} onChange={(e) => setForm({ ...form, education: e.target.value })} placeholder="Degree, school, year" /></label>
+    <label>Skills (optional)<input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} placeholder="Things you're good at, separated by commas" /></label>
+    <button className="primary wide" disabled={!starterReady(form)} onClick={() => done(starterResumeText(form))}>Use this as my resume <ArrowRight size={18} /></button>
+    {!starterReady(form) && <p className="form-hint">Add your name and at least one job with a line about what you did.</p>}
+  </>;
 }
 
 function SourceBlock({ icon, title, required, note, tour, children }) { return <section className="source-block" data-tour={tour}><div className="source-block-title"><span>{icon}</span><div><strong>{title}{required && " *"}</strong><small>{note}</small></div></div>{children}</section>; }

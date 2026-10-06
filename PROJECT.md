@@ -144,6 +144,8 @@ Three ideas hold the whole product together:
   - Tests (`npm test`; run `npm run build` first because one hosting test checks build output): `career-ai` 15, `claims` 9, `compare` 5, `evidence` 13, `net-safety` 14, `parsecheck` 4, `probes` 9, `pptx` 2, `sites-worker` 6, `license` 17, `license-store` 9 = 103.
   - `AGENTS.md` — instructions left for coding agents working in this repo.
 
+- **No resume? Start one in the app (Oct 6, 2026).** The first screen has an "I don't have a resume. Help me write one" link under the resume box. It opens a form (name, jobs newest first with dates and what you did, school, skills) and drops the result into the resume box as plain text. Only the person's own words go in; no AI call, nothing added or rewritten (rules 1 and 2). Code: `src/lib/starter.js`, `StarterResume` in `src/App.jsx`, tests in `tests/starter.test.mjs`.
+
 ## 7. Rules of the house
 
 Decisions that must not be reversed. Check every new request against these.
