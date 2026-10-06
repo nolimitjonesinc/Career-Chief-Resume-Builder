@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** October 5, 2026
+**Last updated:** October 6, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
