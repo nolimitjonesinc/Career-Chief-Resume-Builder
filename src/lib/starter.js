@@ -16,7 +16,7 @@ export function jobHeading(job) {
 
 export function starterResumeText(form) {
   const jobs = (form.jobs || []).filter(hasJob);
-  const lines = [clean(form.name), clean(form.headline), clean(form.contact)].filter(Boolean);
+  const lines = [clean(form.name), clean(form.headline), [clean(form.email), clean(form.phone)].filter(Boolean).join(" | ")].filter(Boolean);
   if (clean(form.summary)) lines.push("SUMMARY", clean(form.summary));
   lines.push("EXPERIENCE");
   for (const job of jobs) {

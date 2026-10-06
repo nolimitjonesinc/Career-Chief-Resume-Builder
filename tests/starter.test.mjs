@@ -6,7 +6,8 @@ import { starterReady, starterResumeText } from "../src/lib/starter.js";
 const form = {
   name: "Sam Rivera",
   headline: "Operations Manager",
-  contact: "sam@example.com | (555) 010-2000",
+  email: "sam@example.com",
+  phone: "(555) 010-2000",
   summary: "",
   jobs: [
     { title: "Operations Manager", company: "Harbor Foods", start: "2021", end: "", did: "- Ran a team of nine\n- Cut delivery delays in half" },
@@ -20,7 +21,7 @@ const job = { id: "j", kind: "job", name: "Job", text: "Lead operations for a gr
 
 test("the form becomes plain resume text using only the person's words", () => {
   const text = starterResumeText(form);
-  assert.match(text, /^Sam Rivera\nOperations Manager\nsam@example.com/);
+  assert.match(text, /^Sam Rivera\nOperations Manager\nsam@example.com \| \(555\) 010-2000\n/);
   assert.match(text, /Operations Manager, Harbor Foods \(2021 – Present\)/);
   assert.match(text, /Ran a team of nine\nCut delivery delays in half/);
   assert.doesNotMatch(text, /^SUMMARY$/m);

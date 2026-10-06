@@ -626,11 +626,11 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
 }
 
 function StarterResume({ done }) {
-  const [form, setForm] = useState({ name: "", headline: "", contact: "", education: "", skills: "", jobs: [blankJob()] });
+  const [form, setForm] = useState({ name: "", headline: "", email: "", phone: "", education: "", skills: "", jobs: [blankJob()] });
   const setJob = (index, patch) => setForm({ ...form, jobs: form.jobs.map((job, i) => i === index ? { ...job, ...patch } : job) });
   return <><h2>Let's build your first resume.</h2><p>Type it the way you'd tell a friend. Rough is fine. Everything stays your words, and Career Chief helps you sharpen it next.</p>
     <div className="two-fields"><label>Your name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="First and last name" /></label><label>Job title you go by<input value={form.headline} onChange={(e) => setForm({ ...form, headline: e.target.value })} placeholder="e.g. Operations Manager" /></label></div>
-    <label>Email and phone<input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="you@email.com | (555) 555-5555" /></label>
+    <div className="two-fields"><label>Email<input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@email.com" /></label><label>Phone<input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="(555) 555-5555" /></label></div>
     <h3 className="starter-jobs">Jobs you've had, newest first</h3>
     {form.jobs.map((job, index) => <section className="starter-job" key={index}>
       <div className="two-fields"><label>Job title<input value={job.title} onChange={(e) => setJob(index, { title: e.target.value })} placeholder="What they called you" /></label><label>Company<input value={job.company} onChange={(e) => setJob(index, { company: e.target.value })} placeholder="Where" /></label></div>
