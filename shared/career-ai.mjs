@@ -1,6 +1,7 @@
 import { aiTextLimit } from "./source-limits.mjs";
 import { aiLimits } from "./config.mjs";
 import { GuardError, aiSwitchOn, assertAllowedOrigin, costOf, readJsonLimited, spendOrThrow } from "./ai-guard.mjs";
+import { assertAccess, guardReply } from "./access.mjs";
 import { unsupportedNumbers } from "./claims.mjs";
 import { inflatedTitles, looksLikeGap, novelShare } from "./gaps.mjs";
 import { readTextLimited } from "./limited-read.mjs";
@@ -338,6 +339,7 @@ export async function handleCareerAI(request, env = {}, fetchImpl = fetch) {
   const route = routes[pathname];
   if (!route) return Response.json({ error: "Not found." }, { status: 404 });
   if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
+  try { await assertAccess(request, env); } catch (error) { if (error instanceof GuardError) return guardReply(error); throw error; }
   if (!aiSwitchOn(env)) return Response.json({ error: "AI research is not connected yet. The transparent prototype analysis is still available." }, { status: 503 });
   try {
     assertAllowedOrigin(request, env);

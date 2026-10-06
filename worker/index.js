@@ -1,16 +1,19 @@
 import { extractPublicUrl } from "../shared/url-extract.mjs";
 import { handleCareerAI } from "../shared/career-ai.mjs";
 import { assertAllowedOrigin, GuardError } from "../shared/ai-guard.mjs";
+import { assertAccess, handleAccess } from "../shared/access.mjs";
 
 export default {
   async fetch(request, env) {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/api/access") return handleAccess(request, env);
     if (requestUrl.pathname.startsWith("/api/ai/")) return handleCareerAI(request, env);
     if (requestUrl.pathname === "/api/extract-url") {
       if (request.method !== "POST") return Response.json({ error: "Method not allowed." }, { status: 405 });
       try {
         // The link reader is a public-URL fetcher: only our own pages may call it.
         assertAllowedOrigin(request, env);
+        await assertAccess(request, env);
         const { url } = await request.json();
         const result = await extractPublicUrl(url, env.URL_FETCH || fetch, { resolve: env.URL_RESOLVE });
         return Response.json(result);

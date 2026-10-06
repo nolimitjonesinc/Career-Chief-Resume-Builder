@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import { extractPublicUrl } from "./shared/url-extract.mjs";
 import { handleCareerAI } from "./shared/career-ai.mjs";
 import { aiEnvFrom } from "./shared/ai-guard.mjs";
+import { assertAccess, handleAccess } from "./shared/access.mjs";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
@@ -29,6 +30,17 @@ function urlExtractor() {
           res.end(await response.text());
         } catch (error) { next(error); }
       });
+      server.middlewares.use("/api/access", async (req, res, next) => {
+        try {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const request = new Request("http://localhost/api/access", { method: req.method, headers: req.headers, body: req.method === "GET" ? undefined : Buffer.concat(chunks) });
+          const response = await handleAccess(request, aiEnvFrom(process.env));
+          res.statusCode = response.status;
+          res.setHeader("content-type", "application/json");
+          res.end(await response.text());
+        } catch (error) { next(error); }
+      });
       server.middlewares.use("/api/extract-url", async (req, res) => {
         if (req.method !== "POST") {
           res.statusCode = 405;
@@ -36,13 +48,14 @@ function urlExtractor() {
           return;
         }
         try {
+          await assertAccess(new Request("http://localhost/api/extract-url", { headers: req.headers }), aiEnvFrom(process.env));
           let raw = "";
           for await (const chunk of req) raw += chunk;
           const result = await extractPublicUrl(JSON.parse(raw || "{}").url);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify(result));
         } catch (error) {
-          res.statusCode = 422;
+          res.statusCode = error.status || 422;
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ error: error.message || "The link could not be read." }));
         }

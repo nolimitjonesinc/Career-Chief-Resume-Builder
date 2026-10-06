@@ -115,3 +115,12 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .tailor-cols small{display:block;color:#65716c;margin-bottom:4px;font-weight:700;letter-spacing:.05em}
 .why-list{margin:8px 0 4px;padding-left:20px;color:#3b4a44}
 @media (max-width:640px){.tailor-cols{grid-template-columns:1fr}}
+
+/* Private-preview code screen */
+.gate-wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--cream)}
+.gate-card{width:min(440px,100%);background:#fff;border:1px solid var(--line);border-radius:12px;padding:34px 30px;display:flex;flex-direction:column;gap:6px}
+.gate-card .eyebrow{display:flex;align-items:center;gap:6px;margin-top:18px}
+.gate-card h1{font-size:clamp(28px,6vw,36px);margin:10px 0 6px}
+.gate-card p{margin:0 0 6px}
+.gate-card button{margin-top:14px}
+.gate-error{color:#9a3412;font-size:13px;font-weight:600}
