@@ -27,6 +27,7 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Branch `feature/claude-haiku` is pushed and ready to review (Claude Haiku provider, real resume headings, tailor-to-job, honesty guards, 114 tests pass). **Blocked on one thing:** add credits to the Anthropic account (Plans & Billing), then re-run the three-job live check once to confirm the last four guard fixes. Then merge or send back notes.
 
 ## Done
+- [x] Oct 6: access-code gate built, 114 checks pass, tried in a real browser (locked, wrong code, right code, refresh, changed code), pushed on `feature/claude-haiku` (commit 572e26c). Not live: waiting on DJ's yes to deploy and set the codes.
 - [x] Guided-tour copy finalized and pushed to main (Oct 2-5, 2026): "Every job gets its own resume. Updated. Custom tailored. For you." and "It tailors your evidence to the new role." Still unchecked: Vercel deploy shows Ready, and the longer first bubble on a phone ‹CHECK›
 - [x] Safety layer: one `AI_ENABLED` gate for every runtime, origin check, per-caller and daily limits, response size cap, dev-server AI routes loopback-only, SSRF narrowed (feature branch, Oct 1, 2026)
 - [x] Evidence ledger, live role coverage, own-words interview questions, 22 themes, Compare jobs, parse check, why-this-wording, optional AI "ask for a change", homepage before/after, saved-draft versioning (feature branch, Oct 1, 2026)
