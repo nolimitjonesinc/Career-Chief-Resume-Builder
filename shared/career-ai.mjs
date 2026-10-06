@@ -274,7 +274,7 @@ async function revise(payload, auth, fetchImpl, maxBytes) {
 async function tailor(payload, auth, fetchImpl, maxBytes) {
   const attempt = () => ask(auth, {
     model: MODELS.drafting, store: false,
-    instructions: `${instructions} You are tailoring ONE existing resume to ONE job. You may only (1) rewrite the summary, (2) put the current-role bullets in the order that serves this job best and reword them lightly for clarity and emphasis, and (3) reorder the skills. Use only facts and figures already in the candidate's resume sections and answers; never add a figure, title, tool, employer, date, team size or result. Never mention a gap, weakness or what the candidate lacks. Every existing bullet must appear exactly once. Write the summary as at most 2 confident sentences under 350 characters in the candidate's own voice, with no phrases like "relevant to" or "seeking". Output JSON only.`,
+    instructions: `${instructions} You are tailoring ONE existing resume to ONE job. You may only (1) rewrite the summary, (2) put the current-role bullets in the order that serves this job best and reword them lightly for clarity and emphasis, and (3) reorder the skills. Use only facts and figures already in the candidate's resume sections and answers; never add a figure, title, tool, employer, date, team size or result. Do not calculate or restate any figure in a new form: no percentages, totals or ratios you work out yourself; use figures exactly as written. Never mention a gap, weakness or what the candidate lacks. Every existing bullet must appear exactly once. Write the summary as at most 2 confident sentences under 350 characters in the candidate's own voice, with no phrases like "relevant to" or "seeking". Output JSON only.`,
     input: `Output JSON keys summary (string), currentBullets (array of objects {id, text}: every supplied id exactly once, most relevant first), skills (string, exactly the same skills, only reordered, same separators), why (array of at most 4 short plain sentences about what moved and why; never mention gaps). Keep the candidate's real job function and level: do not call them a leader, director, head or operations expert unless their own words do.\n${JSON.stringify({ role: payload.role, company: payload.company, jobPriorities: payload.priorities?.slice(0, 12), summary: payload.summary, currentRoleHeader: payload.header, currentBullets: payload.bullets.map((text, index) => ({ id: index + 1, text })), skills: payload.skills, candidateAnswers: payload.answers?.slice(-12) })}`,
     text: { format: { type: "json_object" } },
   }, fetchImpl, maxBytes);
@@ -293,17 +293,22 @@ async function tailor(payload, auth, fetchImpl, maxBytes) {
   const skillItems = (text) => text.split(/\s*[,·|;•]\s*/).map((item) => item.trim().toLowerCase()).filter(Boolean).sort();
   const sameSkills = JSON.stringify(skillItems(originalSkills)) === JSON.stringify(skillItems(String(data.skills || "")));
   const skills = sameSkills ? String(data.skills).trim().slice(0, 450) : originalSkills;
-  const all = [summary, ...bullets, skills].join("\n");
   // The person's own résumé words may mention a gap; only NEW talk of gaps is refused.
   // Their interview answers are not an allowance: they are where admissions live.
   const own = [payload.summary, payload.header, payload.skills, ...payload.bullets].filter(Boolean).map(String);
   const support = [...own, ...(payload.answers || [])].filter(Boolean).map(String);
-  if (looksLikeGap(all) && !looksLikeGap(own.join("\n"))) throw new Error("The tailored version talked about gaps or plans, so nothing was changed.");
-  const inflated = inflatedTitles(all, support);
+  const ownHasGap = looksLikeGap(own.join("\n"));
+  // The summary is judged on its own: if it goes wrong the person keeps theirs and still gets the reordered lines.
+  const summaryBad = summary && ((!ownHasGap && looksLikeGap(summary)) || inflatedTitles(summary, support).length > 0 || unsupportedNumbers(summary, support).length > 0 || novelShare(summary, support) > MAX_NOVEL);
+  const kept = summary && !summaryBad ? summary : "";
+  const notes = summaryBad ? ["Your summary was left as you wrote it: the AI's version said things your material does not."] : [];
+  const rest = [...bullets, skills].join("\n");
+  if (!ownHasGap && looksLikeGap(rest)) throw new Error("The tailored version talked about gaps or plans, so nothing was changed.");
+  const inflated = inflatedTitles(rest, support);
   if (inflated.length) throw new Error(`The tailored version called you a "${inflated[0]}", which your material does not, so nothing was changed.`);
-  const stray = unsupportedNumbers(all, support);
+  const stray = unsupportedNumbers(rest, support);
   if (stray.length) throw new Error(`The tailored version added a figure that is not in your material (${stray.slice(0, 3).join(", ")}), so nothing was changed.`);
-  return { summary: summary || null, currentLines: [...(payload.header ? [payload.header] : []), ...bullets], skills, why: (Array.isArray(data.why) ? data.why : []).slice(0, 4).map((item) => String(item).slice(0, 220)) };
+  return { summary: kept || null, currentLines: [...(payload.header ? [payload.header] : []), ...bullets], skills, why: [...(Array.isArray(data.why) ? data.why : []).slice(0, 4).map((item) => String(item).slice(0, 220)), ...notes] };
 }
 
 const priorOk = (value) => value === undefined || (Array.isArray(value) && value.every((item) => isText(item) || (isObject(item) && (item.text === undefined || isText(item.text)))));

@@ -3,7 +3,7 @@ import test from "node:test";
 import { inflatedTitles, looksLikeGap } from "../shared/gaps.mjs";
 
 test("denials, plans and willingness are gap talk; achievements are not", () => {
-  for (const line of ["No, I haven't worked in healthcare.", "I did not own sales enablement.", "Pricing is a development area.", "Ready to deepen product expertise.", "I would approach it with interviews.", "Acknowledged the gap."]) assert.equal(looksLikeGap(line), true, line);
+  for (const line of ["No, I haven't worked in healthcare.", "I did not own sales enablement.", "Pricing is a development area.", "Ready to deepen product expertise.", "I would approach it with interviews.", "Acknowledged the gap.", "No direct ownership of retention metrics.", "Without direct experience in churn analysis."]) assert.equal(looksLikeGap(line), true, line);
   for (const line of ["Cut cost per lead 22%.", "Led a team of four marketers.", "Launched six feature launches with sales and product.", "Built the learning program for new hires."]) assert.equal(looksLikeGap(line), false, line);
 });
 

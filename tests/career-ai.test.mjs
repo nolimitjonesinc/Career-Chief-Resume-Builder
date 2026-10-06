@@ -282,16 +282,28 @@ test("tailor: a faithful reorder comes back with the header kept first", async (
   assert.equal(result.skills, "Paid search, Looker, HubSpot");
 });
 
-test("tailor: an invented figure, a missing bullet, or a gap confession is refused whole", async () => {
-  const invented = await tailorWith({ ...goodTailor, summary: "Marketing manager who grew pipeline 300%." });
+test("tailor: a bad bullet, a missing bullet or a doubled bullet is refused whole", async () => {
+  const withBullets = (list) => ({ ...goodTailor, currentBullets: list });
+  const invented = await tailorWith(withBullets([{ id: 2, text: "Cut cost per lead 40% by moving budget." }, goodTailor.currentBullets[1], goodTailor.currentBullets[2]]));
   assert.equal(invented.status, 422);
   assert.match((await invented.json()).error, /figure that is not in your material/);
-  const dropped = await tailorWith({ ...goodTailor, currentBullets: goodTailor.currentBullets.slice(0, 2) });
-  const doubled = await tailorWith({ ...goodTailor, currentBullets: [goodTailor.currentBullets[0], goodTailor.currentBullets[0], goodTailor.currentBullets[2]] });
-  assert.match((await doubled.json()).error, /incomplete/);
+  const dropped = await tailorWith(withBullets(goodTailor.currentBullets.slice(0, 2)));
   assert.match((await dropped.json()).error, /incomplete/);
-  const confess = await tailorWith({ ...goodTailor, summary: "Marketing manager who lacks paid social experience." });
-  assert.match((await confess.json()).error, /gaps/);
+  const doubled = await tailorWith(withBullets([goodTailor.currentBullets[0], goodTailor.currentBullets[0], goodTailor.currentBullets[2]]));
+  assert.match((await doubled.json()).error, /incomplete/);
+  const confess = await tailorWith(withBullets([{ id: 2, text: "Cut cost per lead 22% but lacks paid social experience." }, goodTailor.currentBullets[1], goodTailor.currentBullets[2]]));
+  assert.match((await confess.json()).error, /gaps or plans/);
+});
+
+test("tailor: a bad summary is dropped on its own and the reordered lines still come through", async () => {
+  for (const summary of ["Marketing manager who grew pipeline 300%.", "Marketing manager who lacks paid social experience.", "Marketing leader with nine years in B2B SaaS.", "Marketer with nine years in B2B SaaS, ready to deepen product expertise."]) {
+    const response = await tailorWith({ ...goodTailor, summary });
+    assert.equal(response.status, 200, summary);
+    const result = await response.json();
+    assert.equal(result.summary, null, summary);
+    assert.match(result.why.at(-1), /left as you wrote it/);
+    assert.match(result.currentLines[1], /cost per lead/);
+  }
 });
 
 test("tailor: dropped skills fall back to the original list", async () => {
@@ -304,13 +316,11 @@ test("tailor: a bad request spends nothing", async () => {
   assert.equal(response.status, 422);
 });
 
-test("tailor: new skills, a bigger title, or talk of readiness to learn are all refused", async () => {
+test("tailor: added skills fall back to the original list; a bigger title in a bullet is refused", async () => {
   const addedSkill = await (await tailorWith({ ...goodTailor, skills: "Paid search, Looker, HubSpot, Budget management" })).json();
   assert.equal(addedSkill.skills, tailorBody.skills);
-  const inflated = await tailorWith({ ...goodTailor, summary: "Marketing leader with nine years in B2B SaaS." });
+  const inflated = await tailorWith({ ...goodTailor, currentBullets: [{ id: 2, text: "Led as marketing leader: cut cost per lead 22% by moving budget to intent-based channels." }, goodTailor.currentBullets[1], goodTailor.currentBullets[2]] });
   assert.match((await inflated.json()).error, /called you a "leader"/);
-  const plan = await tailorWith({ ...goodTailor, summary: "Marketer with nine years in B2B SaaS, ready to deepen product expertise." });
-  assert.match((await plan.json()).error, /gaps or plans/);
 });
 
 test("wording: a plan or a hypothetical never becomes a resume line", async () => {

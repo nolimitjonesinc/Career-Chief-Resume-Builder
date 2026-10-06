@@ -50,3 +50,10 @@ test("other sections such as certifications are kept, not dropped", () => {
   assert.match(d.earlier, /CERTIFICATIONS/);
   assert.match(d.earlier, /HubSpot Inbound Certified/);
 });
+
+import { proposeResumeUpdate } from "../src/lib/analyze.js";
+test("a contraction at the start of an answer does not leak first person into the resume line", () => {
+  const line = proposeResumeUpdate({}, { id: "x" }, "I've directly managed 4 marketers at Brightwave, and I've coached two of them. More text.");
+  assert.match(line, /^Directly managed 4 marketers/);
+  assert.doesNotMatch(line, /^I/);
+});

@@ -250,7 +250,7 @@ export function analyzeSources(sources, meta) {
 
 export function proposeResumeUpdate(doc, question, answer) {
   const cleanAnswer = answer.trim().replace(/\s+/g, " ");
-  const first = cleanAnswer.split(/(?<=[.!?])\s+/)[0];
+  const first = cleanAnswer.split(/(?<=[.!?])\s+/)[0].replace(/^i['’](?:ve|m|d)\s+/i, "I ");
   const lead = /^(i |my |we )/i.test(first) ? first.replace(/^i\s+/i, "").replace(/^my\s+/i, "").replace(/^we\s+/i, "Collaborated to ") : first;
   const capitalized = lead.charAt(0).toUpperCase() + lead.slice(1);
   if (question.id === "ownership" && /customer and expert content program/i.test(cleanAnswer)) {
