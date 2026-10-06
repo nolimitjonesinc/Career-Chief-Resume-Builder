@@ -22,7 +22,7 @@ production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 - [ ] Get 10–20 real people through it and collect before/after examples and testimonials (blocked on the items above)
 
 ## Doing now
-- [ ] **Turn on the access gate for careerchief.ai:** now merged to main; in Vercel add the setting `ACCESS_CODE` (DJ's personal code plus a guest code, comma separated) and redeploy. Do this BEFORE the Anthropic key goes on the live site. Also bind the shared store (`AI_LIMIT_STORE`) so the wrong-guess lockout and the daily spend cap hold across servers; without it they only slow people down. The gate is built and tested; it is not live until that is done.
+- [x] Oct 6: access gate is LIVE on careerchief.ai (code set in Vercel, redeployed, tried on the real site: stranger sees the code screen, wrong code refused, both codes work). Codes are saved in DJ's private key file. Still to do: shared store so the lockout holds across servers; key for AI not on the live site yet.
 - [ ] Claude Haiku provider is merged to main (Claude Haiku provider, real resume headings, tailor-to-job, honesty guards, 116 tests pass). **Blocked on one thing:** add credits to the Anthropic account (Plans & Billing), then re-run the three-job live check once to confirm the last four guard fixes. Then merge or send back notes.
 - [ ] Claude Haiku provider + tailor-to-job from branch `feature/claude-haiku` (committed Oct 5, merged Oct 6). Privacy policy must name Anthropic once live
 
