@@ -146,12 +146,115 @@ function licenseKeySummary(raw) {
     id: key.id ?? null,
     status: key.status ?? null,
     key: typeof key.key === "string" ? key.key : null,
+    // createdAt anchors client-side term expiry: a license key is issued at
+    // purchase time, so createdAt + the tier's term is when Pro ends — even if
+    // the buyer re-activates later in another browser. expiresAt is Lemon
+    // Squeezy's own expiry when it sets one (null for one-time products).
+    createdAt: typeof key.created_at === "string" ? key.created_at : null,
+    expiresAt: typeof key.expires_at === "string" ? key.expires_at : null,
   };
+}
+
+// The `meta` block on every License API response names the store, product and
+// variant the key was sold for. It is the only thing tying a key to THIS
+// product: the public License API is unauthenticated, so without checking it,
+// a license key bought from any other Lemon Squeezy merchant would validate
+// here too.
+export function parseLicenseMeta(raw) {
+  const meta = asRecord(raw);
+  const num = (value) => (value === null || value === undefined || value === "" ? null : value);
+  const str = (value) => (typeof value === "string" && value !== "" ? value : null);
+  return {
+    storeId: num(meta.store_id),
+    orderId: num(meta.order_id),
+    orderItemId: num(meta.order_item_id),
+    productId: num(meta.product_id),
+    productName: str(meta.product_name),
+    variantId: num(meta.variant_id),
+    variantName: str(meta.variant_name),
+    customerId: num(meta.customer_id),
+    customerName: str(meta.customer_name),
+    customerEmail: str(meta.customer_email),
+  };
+}
+
+// ── Term expiry ───────────────────────────────────────────────────────────
+
+// Lemon Squeezy does not expire license keys for one-time products — the store
+// sells "30-Day" and "1-Year" tiers, but the keys stay valid forever unless we
+// enforce the term ourselves. The tier is identified from the meta block: first
+// by matching the tier's configured name against the variant name, then by
+// keyword fallback on the variant name. Unknown tiers return null (no expiry)
+// so a paying customer is never locked out by a naming surprise.
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Match a license variant name against the configured tier names. Returns the
+// tier object, or null when nothing matches. Used for the tier label in the UI
+// and as the preferred signal for term length.
+export function matchTier(variantName, tiers = []) {
+  const name = String(variantName || "").toLowerCase();
+  if (!name) return null;
+  const list = Array.isArray(tiers) ? tiers : [];
+  for (const tier of list) {
+    const tierName = tier && typeof tier.name === "string" ? tier.name.toLowerCase() : "";
+    if (tierName !== "" && name.includes(tierName)) return tier;
+  }
+  for (const tier of list) {
+    const tierName = tier && typeof tier.name === "string" ? tier.name.toLowerCase() : "";
+    if (tierName !== "" && tierName.includes(name)) return tier;
+  }
+  return null;
+}
+
+export function licenseTermMs(variantName, tiers = []) {
+  // Prefer the configured tier names: the variant name usually contains them
+  // ("Career Chief Pro — 30-Day").
+  const tier = matchTier(variantName, tiers);
+  const haystack = `${tier ? tier.name : ""} ${variantName || ""}`.toLowerCase();
+  if (/(lifetime|life-time|forever)/.test(haystack)) return null;
+  if (/(year|annual|12.?mo|365)/.test(haystack)) return 365 * DAY_MS;
+  if (/(30|month|day)/.test(haystack)) return 30 * DAY_MS;
+  return null;
+}
+
+// The earliest moment Pro ends for this key, as an ISO string, or null when
+// the key never expires. Anchored on the key's creation (purchase) time so
+// re-activating in another browser cannot extend the term.
+export function computeExpiresAt({ createdAt, lsExpiresAt, variantName, tiers } = {}) {
+  const termMs = licenseTermMs(variantName, tiers);
+  const candidates = [];
+  if (typeof lsExpiresAt === "string" && !Number.isNaN(Date.parse(lsExpiresAt))) {
+    candidates.push(Date.parse(lsExpiresAt));
+  }
+  if (termMs !== null) {
+    const created = typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
+    if (!Number.isNaN(created)) candidates.push(created + termMs);
+  }
+  if (candidates.length === 0) return null;
+  return new Date(Math.min(...candidates)).toISOString();
+}
+
+// ── Key-to-product assertion ──────────────────────────────────────────────
+
+// Reject keys that are not from this store. Fails closed: a missing meta
+// block, or a store id that does not match the configured one, means the key
+// is not accepted. When no store id is configured (local dev), only the
+// presence of the meta block is required.
+export function assertLicenseMeta(meta, config = {}) {
+  if (!meta || typeof meta !== "object" || meta.storeId === null || meta.storeId === undefined || meta.storeId === "") {
+    return { ok: false, error: "The license server did not identify which product this key belongs to." };
+  }
+  const want = String(config.storeId || "").trim();
+  if (want !== "" && String(meta.storeId) !== want) {
+    return { ok: false, error: "This license key belongs to a different store." };
+  }
+  return { ok: true, error: "" };
 }
 
 // POST /v1/licenses/activate → { activated, error, license_key, instance, meta }
 export function parseActivate(json) {
   const data = asRecord(json);
+  const meta = parseLicenseMeta(data.meta);
   if (data.activated === true) {
     const instance = asRecord(data.instance);
     return {
@@ -160,6 +263,7 @@ export function parseActivate(json) {
       instanceId: instance.id ?? null,
       instanceName: instance.name ?? null,
       license: licenseKeySummary(data.license_key),
+      meta,
       error: null,
     };
   }
@@ -169,6 +273,7 @@ export function parseActivate(json) {
     instanceId: null,
     instanceName: null,
     license: licenseKeySummary(data.license_key),
+    meta,
     error: typeof data.error === "string" && data.error ? data.error : "That license key could not be activated.",
   };
 }
@@ -176,13 +281,15 @@ export function parseActivate(json) {
 // POST /v1/licenses/validate → { valid, error, license_key, instance, meta }
 export function parseValidate(json) {
   const data = asRecord(json);
+  const meta = parseLicenseMeta(data.meta);
   if (data.valid === true) {
-    return { ok: true, valid: true, license: licenseKeySummary(data.license_key), error: null };
+    return { ok: true, valid: true, license: licenseKeySummary(data.license_key), meta, error: null };
   }
   return {
     ok: false,
     valid: false,
     license: licenseKeySummary(data.license_key),
+    meta,
     error: typeof data.error === "string" && data.error ? data.error : "That license key is not valid.",
   };
 }
@@ -191,12 +298,13 @@ export function parseValidate(json) {
 export function parseDeactivate(json) {
   const data = asRecord(json);
   if (data.deactivated === true) {
-    return { ok: true, deactivated: true, license: licenseKeySummary(data.license_key), error: null };
+    return { ok: true, deactivated: true, license: licenseKeySummary(data.license_key), meta: parseLicenseMeta(data.meta), error: null };
   }
   return {
     ok: false,
     deactivated: false,
     license: licenseKeySummary(data.license_key),
+    meta: parseLicenseMeta(data.meta),
     error: typeof data.error === "string" && data.error ? data.error : "That license could not be deactivated.",
   };
 }

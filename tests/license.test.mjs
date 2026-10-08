@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   LicenseClient,
+  DAY_MS,
   activateBody,
+  assertLicenseMeta,
   buildCheckoutUrl,
+  computeExpiresAt,
   deactivateBody,
   isProActive,
   licenseConfig,
+  licenseTermMs,
+  matchTier,
   normalizeLicenseKey,
   parseActivate,
   parseDeactivate,
+  parseLicenseMeta,
   parseTiers,
   parseValidate,
   validateBody,
@@ -256,4 +262,125 @@ test("only a positively validated license opens the paid gate", () => {
   assert.equal(isProActive("checking"), false);
   assert.equal(isProActive(undefined), false);
   assert.equal(isProActive(null), false);
+});
+
+// ── Meta parsing ──────────────────────────────────────────────────────────
+
+test("parseLicenseMeta reads the store/product/variant identity", () => {
+  const meta = parseLicenseMeta({
+    store_id: 489627, product_id: 1410663, product_name: "Career Chief Pro",
+    variant_id: 11, variant_name: "Career Chief Pro \u2014 30-Day",
+    customer_email: "t@example.com",
+  });
+  assert.equal(meta.storeId, 489627);
+  assert.equal(meta.productId, 1410663);
+  assert.equal(meta.variantName, "Career Chief Pro \u2014 30-Day");
+  assert.equal(meta.customerEmail, "t@example.com");
+  assert.equal(meta.orderId, null);
+});
+
+test("parseLicenseMeta is null-safe", () => {
+  const meta = parseLicenseMeta(null);
+  assert.equal(meta.storeId, null);
+  assert.equal(meta.variantName, null);
+});
+
+test("parsers carry the meta block through", () => {
+  const meta = { store_id: 1, variant_name: "V" };
+  assert.equal(parseActivate({ activated: true, meta }).meta.storeId, 1);
+  assert.equal(parseValidate({ valid: true, meta }).meta.variantName, "V");
+  assert.equal(parseDeactivate({ deactivated: true, meta }).meta.storeId, 1);
+  // Missing meta degrades to nulls, never throws.
+  assert.equal(parseValidate({ valid: true }).meta.storeId, null);
+});
+
+test("license key summary carries created_at and expires_at", () => {
+  const parsed = parseValidate({
+    valid: true,
+    license_key: { id: 1, status: "active", created_at: "2026-10-01T00:00:00.000Z", expires_at: null },
+  });
+  assert.equal(parsed.license.createdAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(parsed.license.expiresAt, null);
+});
+
+// ── Key-to-product assertion ──────────────────────────────────────────────
+
+test("assertLicenseMeta accepts this store's keys", () => {
+  assert.equal(assertLicenseMeta({ storeId: 489627 }, { storeId: "489627" }).ok, true);
+});
+
+test("assertLicenseMeta rejects foreign stores and missing meta", () => {
+  assert.equal(assertLicenseMeta({ storeId: 999 }, { storeId: "489627" }).ok, false);
+  assert.equal(assertLicenseMeta(null, { storeId: "489627" }).ok, false);
+  assert.equal(assertLicenseMeta({}, { storeId: "489627" }).ok, false);
+});
+
+test("assertLicenseMeta skips the store check when unconfigured", () => {
+  assert.equal(assertLicenseMeta({ storeId: 1 }, {}).ok, true);
+});
+
+// ── Term mapping ──────────────────────────────────────────────────────────
+
+const TIERS = [{ name: "30-Day" }, { name: "1-Year" }, { name: "Lifetime" }];
+
+test("matchTier finds the tier inside the variant name", () => {
+  assert.equal(matchTier("Career Chief Pro \u2014 30-Day", TIERS).name, "30-Day");
+  assert.equal(matchTier("career chief pro 1-year", TIERS).name, "1-Year");
+  assert.equal(matchTier("Lifetime Deal", TIERS).name, "Lifetime");
+  assert.equal(matchTier("Something Else", TIERS), null);
+  assert.equal(matchTier(null, TIERS), null);
+});
+
+test("licenseTermMs maps tiers to durations, lifetime to never", () => {
+  assert.equal(licenseTermMs("Career Chief Pro \u2014 30-Day", TIERS), 30 * DAY_MS);
+  assert.equal(licenseTermMs("Career Chief Pro \u2014 1-Year", TIERS), 365 * DAY_MS);
+  assert.equal(licenseTermMs("Career Chief Pro \u2014 Lifetime", TIERS), null);
+  assert.equal(licenseTermMs("Mystery Tier", TIERS), null);
+});
+
+test("licenseTermMs falls back to keywords when tiers are unknown", () => {
+  assert.equal(licenseTermMs("Pro Monthly", []), 30 * DAY_MS);
+  assert.equal(licenseTermMs("Annual Plan", []), 365 * DAY_MS);
+  assert.equal(licenseTermMs("Forever Access", []), null);
+  assert.equal(licenseTermMs("", []), null);
+});
+
+// ── Expiry computation ────────────────────────────────────────────────────
+
+test("computeExpiresAt anchors on the key's creation time", () => {
+  assert.equal(
+    computeExpiresAt({
+      createdAt: "2026-10-01T12:00:00.000Z",
+      lsExpiresAt: null,
+      variantName: "Career Chief Pro \u2014 30-Day",
+      tiers: TIERS,
+    }),
+    "2026-10-31T12:00:00.000Z"
+  );
+});
+
+test("computeExpiresAt returns null when nothing bounds the term", () => {
+  assert.equal(
+    computeExpiresAt({
+      createdAt: "2026-10-01T12:00:00.000Z",
+      lsExpiresAt: null,
+      variantName: "Career Chief Pro \u2014 Lifetime",
+      tiers: TIERS,
+    }),
+    null
+  );
+  // No creation time either: fail open, never lock out a buyer on bad data.
+  assert.equal(computeExpiresAt({ variantName: "30-Day", tiers: TIERS }), null);
+});
+
+test("computeExpiresAt prefers Lemon Squeezy's own expiry when earlier", () => {
+  assert.equal(
+    computeExpiresAt({
+      createdAt: "2026-10-01T12:00:00.000Z",
+      lsExpiresAt: "2026-10-15T00:00:00.000Z",
+      variantName: "Career Chief Pro \u2014 1-Year",
+      tiers: TIERS,
+    }),
+    "2026-10-15T00:00:00.000Z"
+  );
 });
