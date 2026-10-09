@@ -139,7 +139,13 @@ function roleBlocks(lines) {
 }
 
 function makeDoc(resumeText, role, candidateContext = "") {
-  const lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  let lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  // Defensive: some PDF extractors collapse a whole page into one giant line.
+  // If the first "line" is absurdly long, split the header on | so the name,
+  // title and contact resolve to real values instead of one run-on string.
+  if (lines[0] && lines[0].length > 200 && lines[0].includes("|")) {
+    lines = [...lines[0].split("|").map((part) => part.trim()).filter(Boolean), ...lines.slice(1)];
+  }
   const name = lines[0] || "Your name";
   const title = lines[1] || role || "Professional title";
   const contactIndex = lines.findIndex((line) => /@|linkedin|\d{3}[-.) ]\d{3}/i.test(line));

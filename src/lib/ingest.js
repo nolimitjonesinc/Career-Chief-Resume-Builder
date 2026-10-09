@@ -1,6 +1,30 @@
-import { extractPptx } from "./pptx";
+import { extractPptx } from "./pptx.js";
 
-const clean = (value) => value.replace(/\u0000/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+const clean = (value) => value.replace(/\u0000/g, "")
+  // Source PDFs (e.g. LinkedIn's "Save to PDF") stamp footers like
+  // "Danny Jones Resume Page 1 of 2" on every page. They are layout, not content.
+  .replace(/^[^\n]*\bpage \d+ of \d+\b[^\n]*$/gim, "")
+  .replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+
+// pdf.js returns positioned text items, not lines. Group items that share a
+// y-coordinate into visual lines — without this, a whole page collapses into
+// one giant line and header parsing (name/title/contact) breaks completely.
+export function pdfItemsToLines(items) {
+  const lines = [];
+  let current = [];
+  let lastY = null;
+  for (const item of items) {
+    const y = Math.round(item.transform?.[5] ?? 0);
+    if (lastY !== null && Math.abs(y - lastY) > 3 && current.length) {
+      lines.push(current.join(" "));
+      current = [];
+    }
+    lastY = y;
+    if (item.str) current.push(item.str);
+  }
+  if (current.length) lines.push(current.join(" "));
+  return lines;
+}
 
 export async function extractFile(file) {
   const ext = file.name.split(".").pop()?.toLowerCase();
@@ -23,7 +47,7 @@ export async function extractFile(file) {
     for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 60); pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
-      pages.push(content.items.map((item) => item.str).join(" "));
+      pages.push(pdfItemsToLines(content.items).join("\n"));
     }
     text = pages.join("\n");
   } else if (ext === "pptx") {
