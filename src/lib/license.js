@@ -158,10 +158,20 @@ export async function validateStoredLicense(client = licenseClient(), config = n
   };
 }
 
+// Lemon Squeezy's raw errors are terse ("...activation limit..."). When the
+// seats are exhausted, say so plainly and point at the two ways out.
+function friendlyActivationError(rawError) {
+  const raw = typeof rawError === "string" && rawError ? rawError : "That license key could not be activated.";
+  if (/activation limit|no more activations|maximum .* activat|instance limit/i.test(raw)) {
+    return "This key is already active on 3 browsers. Deactivate it in an old browser to free a seat — or email support@dannyjones.ai and we'll reset it for you.";
+  }
+  return raw;
+}
+
 export async function activateLicense(rawKey, client = licenseClient(), config = null) {
   const result = await client.activate(rawKey, getInstanceName());
   if (!result.ok || !result.activated) {
-    return { ok: false, error: result.error || "That license key could not be activated." };
+    return { ok: false, error: friendlyActivationError(result.error) };
   }
   const cfg = config || licenseConfig();
   // Same guard as validation: a key from any other Lemon Squeezy merchant

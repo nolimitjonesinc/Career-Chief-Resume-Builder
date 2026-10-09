@@ -87,6 +87,30 @@ test("activation is rejected when the key belongs to another store", async () =>
   assert.equal(getStoredLicense(), null);
 });
 
+test("exhausted seats get a friendly error with the way out", async () => {
+  const client = stub(okFetch({
+    activated: false, error: "This license key has reached its activation limit.",
+    license_key: { id: 1, status: "active" },
+    instance: null, meta: META_30,
+  }));
+  const result = await activateLicense("USED-UP-KEY", client, CONFIG);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /already active on 3 browsers/i);
+  assert.match(result.error, /support@dannyjones\.ai/);
+  assert.equal(getStoredLicense(), null);
+});
+
+test("unrelated activation errors pass through untouched", async () => {
+  const client = stub(okFetch({
+    activated: false, error: "That key was revoked.",
+    license_key: { id: 1, status: "active" },
+    instance: null, meta: META_30,
+  }));
+  const result = await activateLicense("REVOKED-KEY", client, CONFIG);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "That key was revoked.");
+});
+
 test("activation without a meta block fails closed", async () => {
   const client = stub(okFetch({
     activated: true, error: null,
