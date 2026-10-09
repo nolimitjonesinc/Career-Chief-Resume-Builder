@@ -168,11 +168,24 @@ export function App() {
     setBusy("Reading the job link…");
     try {
       const result = await extractUrl(jobUrl.trim());
-      addSource({ id: uid(), kind: "job", name: result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" });
+      const job = result.job || {};
+      const filled = [];
+      // Only fill what is empty: anything already typed stays exactly as typed.
+      const nextMeta = { ...meta };
+      if (job.role && !meta.role.trim()) { nextMeta.role = job.role; filled.push("role"); }
+      if (job.company && !meta.company.trim()) { nextMeta.company = job.company; filled.push("company"); }
+      if (filled.length) setMeta(nextMeta);
+      if (job.description && job.description.length >= 80 && !jobText.trim()) {
+        setJobText(job.description);
+        filled.push("job description");
+      } else {
+        addSource({ id: uid(), kind: "job", name: result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" });
+      }
       setJobUrl("");
-      setNotice("The public page was read and added as job evidence.");
+      setNotice(filled.length ? `Read the page and filled in the ${filled.join(", ")}. Check them and fix anything that's off.` : "The public page was read and added as job evidence. Add the company and role above.");
     } catch (error) {
-      setNotice(`${error.message} You can download the page or paste its text instead.`);
+      setNotice(`That site wouldn't let me read the job (some job sites, like LinkedIn, block this). Copy the job text and paste it into the box above instead. (${error.message})`);
+      document.getElementById("job-text")?.focus();
     } finally {
       setBusy("");
     }
@@ -624,8 +637,8 @@ function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText,
       </SourceBlock>
       <div className="two-fields"><label>Target company<input value={meta.company} onChange={(event) => setMeta({ ...meta, company: event.target.value })} placeholder="Company name" /></label><label>Target role<input value={meta.role} onChange={(event) => setMeta({ ...meta, role: event.target.value })} placeholder="Role title" required /></label></div>
       <SourceBlock icon={<Target size={22} />} title="The opportunity" tour="job" required note="Job posting, application questions, or role brief">
-        <textarea value={jobText} onChange={(event) => setJobText(event.target.value)} placeholder="Paste the job description or application questions." />
-        <div className="link-row"><input type="url" value={jobUrl} onChange={(event) => setJobUrl(event.target.value)} placeholder="https://company.com/job" aria-label="Public job link" /><button type="button" className="secondary compact" disabled={!jobUrl.trim() || busy} onClick={readJobLink}><Link size={16} /> Read link</button></div>
+        <label className="link-first">Paste the job link and I'll fill in the rest<div className="link-row"><input type="url" value={jobUrl} onChange={(event) => setJobUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); readJobLink(); } }} placeholder="https://company.com/job" aria-label="Public job link" /><button type="button" className="secondary compact" disabled={!jobUrl.trim() || busy} onClick={readJobLink}><Link size={16} /> Read link</button></div></label>
+        <textarea id="job-text" value={jobText} onChange={(event) => setJobText(event.target.value)} placeholder="Or paste the job description or application questions here." />
         <label className="upload-control"><Paperclip size={17} /> Upload job or application file<input type="file" accept={acceptedFiles} onChange={(event) => addFile(event.target.files[0], "job")} /></label>
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}

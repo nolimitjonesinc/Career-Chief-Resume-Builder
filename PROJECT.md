@@ -1,6 +1,6 @@
 # Career Chief
 
-**Last updated:** October 6, 2026
+**Last updated:** October 9, 2026
 **Status:** Prototype. Branch `feature/trust-and-evidence` adds the trust layer, evidence ledger, smarter interview, job comparison and parse check (see `PLAN.md`, `IMPROVEMENTS.md`). `main` is untouched until Danny merges. **Pro license-key unlock is implemented on `main` (Oct 4, 2026); the Lemon Squeezy store IDs are not yet configured — see `LEMON_SQUEEZY_SETUP.md`.**
 **Lives at:** local only — dev server at `localhost:5199`. Built to deploy to Cloudflare (Workers + static assets); the project's own notes refer to a "deployed demo" running without an AI key. ‹CHECK› is there a live link, and where?
 **Repo:** `nolimitjonesinc/Career-Chief-Resume-Builder` (private)
@@ -69,6 +69,7 @@ Three ideas hold the whole product together:
 - **PowerPoint reading** pulls slide text in the order the slides are shown, speaker notes (often where people write what they actually did), table rows kept together, and the numbers inside charts. Hidden slides are included and marked. Old .ppt and Keynote files get a plain-English "save it as .pptx" message instead of failing silently.
 - **"What should it help with?"** — every added source can be aimed at a part of the application: my current role, past roles and accomplishments, the role I want, or my future cover letter (or let Career Chief decide). This is separate from what the source *is*.
 - Paste unstructured text directly.
+- **Job link is the front door (Oct 9, 2026).** The opportunity box leads with "Paste the job link and I'll fill in the rest." The reader pulls role, company and the job description from the page's own structured job data, then the page title, then the job-board address (Greenhouse, Lever and similar). It fills only fields that are empty (never overwrites typed text), says what it filled, and asks the person to check. No AI call, nothing invented (rules 1 and 2). If a site blocks it (LinkedIn, Indeed), a plain message tells them to paste the job text and jumps the cursor to that box. Code: `jobHints` in `shared/url-extract.mjs`, `readJobLink` in `src/App.jsx`, tests in `tests/job-hints.test.mjs`. Not yet tried against a LinkedIn or Indeed link in a real browser ‹CHECK›.
 - Add a public HTTPS web page; a small server reader pulls its text, with URL validation plus size and timeout limits, and falls back to paste/upload when a page won't cooperate.
 - Sources are categorized: resume, job description, application questions, company research, leadership, current role, career goals, other.
 - An explicit AI-research checkbox, shown only when the server actually has a key. Off by default.

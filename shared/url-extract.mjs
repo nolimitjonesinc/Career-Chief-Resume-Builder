@@ -42,6 +42,66 @@ function htmlToText(html) {
   );
 }
 
+
+// Best-effort job details read from the page itself. Nothing is invented: a
+// field is returned only when the page states it (structured job data first,
+// then the page title, then the job-board address). The caller shows these as
+// editable suggestions.
+const BOARD_NAMES = /^(linkedin|indeed|glassdoor|ziprecruiter|greenhouse|lever|workday|careers?|jobs?|home|apply)\b/i;
+
+function findJobPosting(node) {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const item of node) { const hit = findJobPosting(item); if (hit) return hit; }
+    return null;
+  }
+  const type = node["@type"];
+  if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) return node;
+  return findJobPosting(node["@graph"]);
+}
+
+function cleanLabel(value) {
+  return typeof value === "string" ? decodeEntities(value).replace(/\s+/g, " ").trim().slice(0, 120) : "";
+}
+
+function companyFromAddress(url) {
+  const host = url.hostname.toLowerCase();
+  const first = url.pathname.split("/").filter(Boolean)[0];
+  if (first && /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com)$/.test(host) && /^[a-z0-9-]{2,40}$/i.test(first)) {
+    return first.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return "";
+}
+
+export function jobHints(raw, pageTitle, url) {
+  const hints = { role: "", company: "", description: "" };
+  for (const match of raw.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const posting = findJobPosting(JSON.parse(match[1].trim()));
+      if (!posting) continue;
+      hints.role = cleanLabel(posting.title);
+      const org = posting.hiringOrganization;
+      hints.company = cleanLabel(typeof org === "string" ? org : org?.name);
+      if (typeof posting.description === "string") hints.description = htmlToText(decodeEntities(posting.description)).slice(0, 50_000);
+      break;
+    } catch { /* malformed structured data: fall through to the title */ }
+  }
+  if (!hints.role || !hints.company) {
+    const title = cleanLabel(raw.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] || pageTitle);
+    const at = title.match(/^(.{3,90}?)\s+at\s+(.{2,60}?)(?:\s+[-|–].*)?$/i);
+    const parts = title.split(/\s+[-|–]\s+/).map((part) => part.trim()).filter(Boolean);
+    if (at) {
+      hints.role ||= at[1];
+      hints.company ||= at[2];
+    } else if (parts.length >= 2 && !BOARD_NAMES.test(parts[0])) {
+      hints.role ||= parts[0];
+      if (!BOARD_NAMES.test(parts[1])) hints.company ||= parts[1];
+    }
+  }
+  hints.company ||= companyFromAddress(new URL(url));
+  return hints;
+}
+
 // Follow redirects by hand. Every hop is checked (name, then where the name
 // actually points) BEFORE the request for that hop is made; letting fetch follow
 // redirects would check only after the request had already gone out.
@@ -76,7 +136,7 @@ export async function extractPublicUrl(rawUrl, fetchImpl = fetch, { resolve } = 
     const title = decodeEntities(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || finalUrl.hostname);
     const text = type.includes("html") ? htmlToText(raw) : raw.replace(/\s+/g, " ").trim();
     if (text.length < 80) throw new Error("The page did not expose enough readable text.");
-    return { url: finalUrl.href, title, text: text.slice(0, 50_000), fetchedAt: new Date().toISOString() };
+    return { url: finalUrl.href, title, text: text.slice(0, 50_000), job: jobHints(raw, title, finalUrl.href), fetchedAt: new Date().toISOString() };
   } catch (error) {
     if (error.name === "AbortError") throw new Error("The page took too long to respond.");
     if (error instanceof TypeError && /fetch/i.test(error.message)) throw new Error("The page could not be reached by the link reader.");

@@ -65,3 +65,4 @@ label>input,label>textarea,label>select{margin-top:8px}
 .tier-option strong{font-size:15px}
 .tier-option span{font-size:13px;color:var(--muted);text-align:right}
 .no-resume{display:flex;margin-top:10px}.starter-jobs{margin:22px 0 4px;font-size:15px}.starter-job{border:1px solid var(--line);border-radius:9px;padding:4px 14px 12px;margin:10px 0;background:#fafcfa}
+.link-first{margin:0 0 12px}.link-first .link-row{margin-top:6px;font-weight:400}
