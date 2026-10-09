@@ -45,6 +45,8 @@ Purchases are processed by **Lemon Squeezy**, our merchant of record. They handl
 
 See our [Refund Policy](refund-policy.html). In short: full refunds within 14 days of purchase, requested through support@dannyjones.ai; Lemon Squeezy processes the refund. Nothing in these terms limits your mandatory consumer rights.
 
+If you reverse a payment through your bank or card issuer (a chargeback), your license key is revoked. We may also refuse future sales or refunds to anyone abusing the refund policy — for example, repeatedly buying, exporting everything, and refunding.
+
 ## 6. Acceptable use
 
 You agree not to:
@@ -53,7 +55,7 @@ You agree not to:
 - Abuse the service (scraping, automated bulk use, attempting to disrupt it);
 - Upload content you don't have the right to use.
 
-We may suspend or revoke a license key for fraud, abuse, or violation of these terms, with or without a refund at our discretion.
+We may suspend or revoke a license key for fraud, abuse, or violation of these terms, with or without a refund at our discretion. AI features are rate-limited to keep the service sustainable; we may throttle or suspend AI access for usage far beyond normal personal use.
 
 ## 7. Service changes and availability
 
@@ -66,6 +68,8 @@ To the maximum extent allowed by law, our total liability for any claim related 
 ## 9. Governing law
 
 These terms are governed by the laws of the State of California, without regard to conflict-of-law rules. Disputes will be resolved in the state or federal courts located in Los Angeles County, California.
+
+If any part of these terms is found unenforceable, the rest still applies. If the Career Chief business is sold or transferred, these terms — and any active Pro licenses — transfer with it.
 
 ## 10. Changes to these terms
 
