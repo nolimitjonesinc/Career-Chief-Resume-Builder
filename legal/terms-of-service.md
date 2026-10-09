@@ -19,6 +19,8 @@ Career Chief helps you build and tailor resumes, including with AI-generated dra
 - 1-Year Pro — $79, Pro for 1 year from purchase
 - Lifetime Pro — $149, Pro forever, for as long as Career Chief is offered (see section 8)
 
+**What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro — lifetime or otherwise.
+
 Each license key may be activated in up to **3 browsers**. (Chrome and Safari on the same laptop count as two — a "seat" is a browser, not a computer.) Keys are for your personal use — don't share, resell, or publish them. You can free a seat anytime with "Deactivate on this browser" in the Pro dialog; if you lose access to a browser, email support@dannyjones.ai and we'll reset it.
 
 ## 2. Your content, and what the AI writes
