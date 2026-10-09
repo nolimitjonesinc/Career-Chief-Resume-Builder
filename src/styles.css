@@ -19,3 +19,18 @@ body {
   overflow: hidden;
   position: relative;
 }
+
+/* Site footer: always-visible trust links (refund, privacy, terms, contact). */
+.site-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1.1rem;
+  justify-content: center;
+  padding: 1.4rem 1rem 2rem;
+  font-size: 0.82rem;
+  color: #8a8a90;
+}
+.site-footer a { color: #8a8a90; text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; }
+.site-footer span { font-weight: 600; color: #6d6d73; }

@@ -579,7 +579,20 @@ export function App() {
       {modal === "start-new" && <StartNew keepable={Boolean(analysis && doc)} evidenceCount={careerBank.length} newJob={() => setModal("new-opportunity")} finish={() => setModal("finish")} wipe={clearLocalDraft} />}
       {modal === "clear" && <><h2>Clear this device’s draft?</h2><p>This deletes the saved career material, sources, answers, and resume from this browser. Download anything you need first.</p><button className="secondary" onClick={() => setModal(null)}>Keep my draft</button><button className="primary" onClick={clearLocalDraft}>Clear draft</button></>}
     </dialog>
+    <SiteFooter />
   </>;
+}
+
+// Always-visible trust links: refund policy, privacy, terms, and a human
+// contact. Payment processors check for these on the selling site.
+function SiteFooter() {
+  return <footer className="site-footer">
+    <span>Career Chief</span>
+    <a href="mailto:support@dannyjones.ai">support@dannyjones.ai</a>
+    <a href="/refund-policy.html">Refund Policy</a>
+    <a href="/privacy-policy.html">Privacy</a>
+    <a href="/terms-of-service.html">Terms</a>
+  </footer>;
 }
 
 // The brand leaf, drifting as if it just came off the tree. Used wherever the
