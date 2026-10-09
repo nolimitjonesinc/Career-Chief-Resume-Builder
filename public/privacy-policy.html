@@ -32,35 +32,64 @@ footer a { margin-right: 1.1rem; }
 <p><strong>Operator:</strong> Career Chief, operated by Danny Jones (sole proprietor), Los Angeles, California</p>
 <p><strong>Contact:</strong> support@dannyjones.ai</p>
 </div>
-<p>Career Chief is an AI resume builder. This policy describes what information we handle and why. Short version: your resume is yours, we keep as little as possible, and we never see your payment details.</p>
-<h2>1. Information you give us</h2>
-<p><strong>Your resume and job text.</strong> Everything you type or paste into Career Chief — your work history, skills, job descriptions — is processed in your browser. When you use an AI feature (drafting, research, tailoring), that text is sent to our server, which forwards it to the AI provider to generate the result for that request only. We do not keep a copy of your resume on our servers.</p>
-<p><strong>Which AI company sees your text.</strong> AI is strictly opt-in: each visit starts with AI off, and it only runs after you check the consent box. The consent box names the company that will receive your text — either <strong>OpenAI</strong> or <strong>Anthropic (Claude)</strong> — depending on which one is configured for the site. The company named there is the only AI company your content goes to for that request. AI is only enabled when a provider key is set; without one, the app analyzes what you provide locally and says so.</p>
-<p><strong>What the research step does.</strong> When you ask Career Chief to research a company, it uses the AI provider&#x27;s web search. That means the company name, job title, and other terms from your materials are sent as search queries to the AI provider&#x27;s search service. Public findings come back with clickable sources.</p>
-<p><strong>AI processing notes.</strong> Both providers state that API data is not used to train their models. For the current retention and abuse-monitoring terms of whichever provider is live, review their policy directly:</p>
+<p>Career Chief is an AI resume builder. Short version: your resume is yours, we keep as little as possible, and we never see your payment details.</p>
+<h2>1. What stays in your browser</h2>
+<p>Career Chief saves your work on your own device (browser local storage) so you can pick up where you left off. That includes your resume text and drafts, the job descriptions you add, documents you upload (including their extracted text), your interview answers, the analysis, your saved applications — and your Pro license key.</p>
 <ul>
-<li>OpenAI: https://openai.com/policies/privacy-policy/</li>
-<li>Anthropic: https://www.anthropic.com/legal/privacy</li>
+<li>Nothing is synced between devices or browsers. Each browser holds its own copy.</li>
+<li>This storage has no password or encryption from us — anyone using the same browser profile can read it. Don&#x27;t work with material you need to keep private on a shared computer.</li>
+<li>&quot;Clear saved draft&quot; in the app deletes this local data. It does not cancel your Pro license or delete files you already downloaded.</li>
 </ul>
-<p><strong>Link reader.</strong> If you paste a web address for the link reader, the URL is sent to our server, which fetches the page on your behalf. Our hosting provider processes that request in order to serve it.</p>
-<h2>2. Purchases</h2>
-<p>Payments are handled entirely by Lemon Squeezy, our merchant of record. They collect your name, email address, and payment details and handle sales tax. <strong>We never see or store your card number.</strong> From a purchase we receive only your email address and your license status (which plan, whether the key is valid). See <a href="https://www.lemonsqueezy.com/privacy">Lemon Squeezy&#x27;s privacy policy</a> for how they handle your data.</p>
-<h2>3. Stored in your browser</h2>
-<p>Your Pro license key is saved in your browser&#x27;s local storage so you stay unlocked between visits. Clearing your browser data will remove it — you can re-enter your key anytime. We use no tracking cookies and no third-party analytics.</p>
-<h2>4. What we don&#x27;t do</h2>
+<h2>2. What goes to our server, and when</h2>
+<p><strong>Without AI (the default):</strong> nothing you type or upload leaves your browser. Files are read and parsed locally.</p>
+<p><strong>With AI enabled (opt-in):</strong> when you turn AI on and use an AI feature, the text needed for that request is sent to our server, which forwards it to the AI provider. Depending on what you&#x27;re doing, that can include your resume and job text, your interview answers, rewrite instructions, resume sections, and newly added sources. Company research also sends search terms (company name, job title, and related terms) to the provider&#x27;s web search.</p>
+<ul>
+<li>The AI provider is named in the consent box before anything is sent — either OpenAI or Anthropic (Claude), depending on configuration. Only the named provider receives your content, for that request only.</li>
+<li>Turning AI off stops future requests. It cannot pull back anything already sent.</li>
+<li>AI is only available when a provider key is configured for the site. Without one, the app works locally and says so.</li>
+</ul>
+<p><strong>Link reader:</strong> if you paste a web address, the URL is sent to our server, which fetches the page on your behalf. That request reaches the destination website and passes through normal DNS lookups. Use public links only — never paste URLs containing private access tokens — and don&#x27;t submit confidential employer or client material without permission.</p>
+<p><strong>Document readers:</strong> our Word, PDF, PowerPoint, HTML, and text readers extract everything readable in the file — including PowerPoint speaker notes and hidden slides. Assume anything in the file is read.</p>
+<h2>3. AI data handling and retention</h2>
+<p>We set OpenAI&#x27;s `store: false` option, which instructs OpenAI not to retain API inputs and outputs. That is not zero retention: OpenAI retains limited data for abuse monitoring as described in their documentation. Anthropic generally deletes API inputs and outputs within 30 days, subject to the exceptions in their policy.</p>
+<ul>
+<li>OpenAI API data usage: https://developers.openai.com/api/docs/guides/your-data</li>
+<li>Anthropic data retention: https://privacy.claude.com/en/articles/7996866-how-long-do-you-store-my-organization-s-data</li>
+</ul>
+<p>Under both providers&#x27; commercial/API terms, API data is not used to train models by default.</p>
+<h2>4. Operational data</h2>
+<p>We run no analytics and no advertising trackers. (Do Not Track: there is nothing to turn off — we don&#x27;t track browsing in the first place.) We do handle limited operational data:</p>
+<ul>
+<li><strong>Rate limiting:</strong> to protect the AI endpoints and access-code checks from abuse, we derive a rate-limit identifier from request metadata such as IP-derived values. Failed access attempts may be logged against that identifier.</li>
+<li><strong>Hosting:</strong> the site runs on Vercel, which processes requests to serve the site and keeps standard server logs.</li>
+<li><strong>Support email:</strong> if you write to support@dannyjones.ai, we keep the correspondence needed to help you.</li>
+<li><strong>Purchases:</strong> handled by Lemon Squeezy (section 5).</li>
+</ul>
+<h2>5. Purchases and license validation</h2>
+<p>Payments are handled entirely by Lemon Squeezy, our merchant of record. They collect your name, email address, and payment details and handle sales tax. <strong>We never see or store your card number.</strong> See <a href="https://www.lemonsqueezy.com/privacy">Lemon Squeezy&#x27;s privacy policy</a>.</p>
+<p>There are no accounts: license validation runs in your browser, directly against Lemon Squeezy&#x27;s public license API. What happens with the response:</p>
+<ul>
+<li><strong>Used to validate:</strong> the API response includes your license status plus order and product details (such as the name and email Lemon Squeezy holds for the purchase, the product and variant, and activation counts). We use these only to decide whether Pro unlocks, and to show your tier and expiry.</li>
+<li><strong>Kept:</strong> only your license key and its activation ID, saved in your browser (section 1). We do not keep a copy of your name, order details, or purchase history on our systems.</li>
+</ul>
+<h2>6. What we don&#x27;t do</h2>
 <ul>
 <li>No user accounts. There is nothing to sign up for and no profile to maintain.</li>
 <li>No analytics or advertising trackers.</li>
-<li>We do not sell your personal information, and we do not share your resume content with anyone except the AI provider named in the consent box, for the sole purpose of generating your requested results.</li>
+<li>We do not sell your personal information, and we do not share your resume content with anyone except the AI provider you consented to, for the sole purpose of generating your requested results.</li>
 </ul>
-<h2>5. Your rights</h2>
-<p>To request access to, correction of, or deletion of any personal information we hold about you (for example, the email address associated with a license), email support@dannyjones.ai. If you are a California resident, this policy also serves as our notice of collection under the CCPA/CPRA: the categories above are what we collect, and we do not sell or share personal information as those terms are defined.</p>
-<h2>6. Children</h2>
+<h2>7. Your rights and deletion</h2>
+<ul>
+<li><strong>Data on your device:</strong> use &quot;Clear saved draft&quot; in the app at any time.</li>
+<li><strong>Data we hold:</strong> to request access to, correction of, or deletion of personal information we hold about you (for example, support correspondence), write to support@dannyjones.ai. We keep support and purchase-related records only as long as needed to provide support, comply with legal obligations, or resolve disputes, then delete them.</li>
+<li><strong>California residents:</strong> this policy describes our practices in plain language. Whether specific California privacy statutes apply depends on statutory thresholds (revenue, data volume, data selling), which a small sole-proprietor operation typically does not meet. We honor access and deletion requests from everyone regardless.</li>
+</ul>
+<h2>8. Children</h2>
 <p>Career Chief is not directed at children under 13, and we do not knowingly collect information from them.</p>
-<h2>7. Security</h2>
-<p>We use HTTPS everywhere, keep license validation server-side where it matters, and minimize what we retain — the data we don&#x27;t keep can&#x27;t leak. No system is perfectly secure, and we can&#x27;t guarantee absolute security.</p>
-<h2>8. Changes</h2>
-<p>If we change this policy in a way that affects how your data is handled, we&#x27;ll update this page and note the new effective date at the top. Continued use of Career Chief after changes means you accept the updated policy.</p>
+<h2>9. Security</h2>
+<p>We use HTTPS everywhere and minimize what we retain — the data we don&#x27;t keep can&#x27;t leak. Browser storage is only as private as the device it&#x27;s on. No system is perfectly secure, and we can&#x27;t guarantee absolute security.</p>
+<h2>10. Changes</h2>
+<p>If we change this policy in a way that affects how your data is handled, we&#x27;ll update this page and note the new effective date at the top.</p>
 <footer><a href="/refund-policy.html">Refund Policy</a><a href="/privacy-policy.html">Privacy</a><a href="/terms-of-service.html">Terms</a><a href="mailto:support@dannyjones.ai">support@dannyjones.ai</a></footer>
 </main>
 </body>

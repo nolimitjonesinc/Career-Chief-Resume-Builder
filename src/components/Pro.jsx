@@ -30,7 +30,7 @@ export function ProDialog({
             </a>
           ))}
         </div>
-        <p className="quiet">Checkout opens in a new tab. Your license key arrives by email — any tier's key activates Pro.</p>
+        <p className="quiet">Checkout opens in a new tab. Your license key arrives by email — any tier's key activates Pro. Buying means you agree to the <a href="/terms-of-service.html" target="_blank" rel="noreferrer">Terms</a> and <a href="/refund-policy.html" target="_blank" rel="noreferrer">Refund Policy</a>.</p>
       </> : <div className="caution"><strong>Checkout is not configured yet.</strong><p>The store still needs its product and IDs — see LEMON_SQUEEZY_SETUP.md.</p></div>}
       <h3>Have a license key?</h3>
       <div className="license-row">

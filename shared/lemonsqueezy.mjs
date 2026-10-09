@@ -236,17 +236,23 @@ export function computeExpiresAt({ createdAt, lsExpiresAt, variantName, tiers } 
 
 // ── Key-to-product assertion ──────────────────────────────────────────────
 
-// Reject keys that are not from this store. Fails closed: a missing meta
-// block, or a store id that does not match the configured one, means the key
-// is not accepted. When no store id is configured (local dev), only the
-// presence of the meta block is required.
+// Reject keys that are not from this store and product. Fails closed: a
+// missing meta block, or a store/product id that does not match the
+// configured one, means the key is not accepted. When no ids are configured
+// (local dev), only the presence of the meta block is required. The store
+// check alone is not enough: without the product check, a key for any other
+// product in the same store would unlock Pro here too.
 export function assertLicenseMeta(meta, config = {}) {
   if (!meta || typeof meta !== "object" || meta.storeId === null || meta.storeId === undefined || meta.storeId === "") {
     return { ok: false, error: "The license server did not identify which product this key belongs to." };
   }
-  const want = String(config.storeId || "").trim();
-  if (want !== "" && String(meta.storeId) !== want) {
+  const wantStore = String(config.storeId || "").trim();
+  if (wantStore !== "" && String(meta.storeId) !== wantStore) {
     return { ok: false, error: "This license key belongs to a different store." };
+  }
+  const wantProduct = String(config.productId || "").trim();
+  if (wantProduct !== "" && (meta.productId === null || meta.productId === undefined || meta.productId === "" || String(meta.productId) !== wantProduct)) {
+    return { ok: false, error: "This license key is for a different product." };
   }
   return { ok: true, error: "" };
 }
