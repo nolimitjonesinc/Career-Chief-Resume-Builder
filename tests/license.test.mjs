@@ -319,6 +319,19 @@ test("assertLicenseMeta skips the store check when unconfigured", () => {
   assert.equal(assertLicenseMeta({ storeId: 1 }, {}).ok, true);
 });
 
+test("assertLicenseMeta accepts this store and product's keys", () => {
+  assert.equal(assertLicenseMeta({ storeId: 489627, productId: 1410663 }, { storeId: "489627", productId: "1410663" }).ok, true);
+});
+
+test("assertLicenseMeta rejects keys for other products in the same store", () => {
+  assert.equal(assertLicenseMeta({ storeId: 489627, productId: 999 }, { storeId: "489627", productId: "1410663" }).ok, false);
+  assert.equal(assertLicenseMeta({ storeId: 489627 }, { storeId: "489627", productId: "1410663" }).ok, false);
+});
+
+test("assertLicenseMeta skips the product check when unconfigured", () => {
+  assert.equal(assertLicenseMeta({ storeId: 489627, productId: 999 }, { storeId: "489627" }).ok, true);
+});
+
 // ── Term mapping ──────────────────────────────────────────────────────────
 
 const TIERS = [{ name: "30-Day" }, { name: "1-Year" }, { name: "Lifetime" }];
