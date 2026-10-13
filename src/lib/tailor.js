@@ -23,28 +23,34 @@ const score = (line, vocabulary) => {
 // Stable sort, highest score first; ties keep the person's own order.
 const byRelevance = (lines, vocabulary) => lines.map((line, index) => ({ line, index, value: score(line, vocabulary) })).sort((a, b) => b.value - a.value || a.index - b.index);
 
-// "Current experience" is a role header line followed by bullet lines.
-export function splitCurrent(current) {
-  const lines = String(current || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const hasHeader = lines.length > 1 && /\b(?:19|20)\d{2}\b|present/i.test(lines[0]) && lines[0].length < 160;
-  return hasHeader ? { header: lines[0], bullets: lines.slice(1) } : { header: "", bullets: lines };
+// A role's one-line header for display and for the AI tailor request.
+export function roleHeader(role) {
+  const head = [role.title, role.company].filter(Boolean).join(", ");
+  return [head, role.dates].filter(Boolean).join(" — ");
 }
 
-const splitSkills = (skills) => String(skills || "").split(/\s*[,·|;•]\s*/).map((item) => item.trim()).filter(Boolean);
+// "Current role" for the tailor request: the newest role's header + bullets.
+export function splitRole(role) {
+  if (!role) return { header: "", bullets: [] };
+  return { header: roleHeader(role), bullets: [...(role.bullets || [])] };
+}
+
+const splitSkills = (skills) => (Array.isArray(skills) ? skills : String(skills || "").split(/\s*[,·|;•]\s*/)).map((item) => item.trim()).filter(Boolean);
 
 export function tailorByRules(doc, jobText) {
   const vocabulary = jobVocabulary(jobText);
-  const { header, bullets } = splitCurrent(doc.current);
-  const ordered = byRelevance(bullets, vocabulary);
-  const moved = ordered.filter((item, position) => item.index !== position).length;
-  const currentLines = [...(header ? [header] : []), ...ordered.map((item) => item.line)];
+  let moved = 0;
+  const roles = (doc.roles || []).map((role) => {
+    const ordered = byRelevance(role.bullets || [], vocabulary);
+    moved += ordered.filter((item, position) => item.index !== position).length;
+    return { ...role, bullets: ordered.map((item) => item.line) };
+  });
   const skillList = splitSkills(doc.skills);
   const skillOrder = byRelevance(skillList, vocabulary);
-  const separator = /·/.test(doc.skills) ? " · " : ", ";
-  const skills = skillList.length > 1 ? skillOrder.map((item) => item.line).join(separator) : doc.skills;
+  const skills = skillOrder.map((item) => item.line);
   const skillsMoved = skillOrder.filter((item, position) => item.index !== position).length;
   const why = [];
-  if (moved) why.push(`Moved ${moved} line${moved === 1 ? "" : "s"} in your current role up because the job post talks about them most.`);
+  if (moved) why.push(`Moved ${moved} line${moved === 1 ? "" : "s"} up because the job post talks about them most.`);
   if (skillsMoved) why.push("Put the skills the job post mentions first.");
-  return { summary: null, currentLines, skills, why, changed: Boolean(moved || skillsMoved) };
+  return { summary: null, roles, skills, why, changed: Boolean(moved || skillsMoved) };
 }

@@ -41,7 +41,13 @@ test("placeholders are flagged and an unsupported line is neutral, never an accu
 });
 
 test("the ledger counts every line and lists only the ones needing a check as attention", () => {
-  const doc = { summary: "Generic.", current: "Led brand positioning and customer education across three service lines.\nGrew revenue 90%.", tailored: "Built a customer content program with Sales and 4 experts.", earlier: "", education: "BA", skills: "Leadership" };
+  const doc = {
+    summary: "Generic.",
+    roles: [{ title: "", company: "", dates: "", bullets: ["Led brand positioning and customer education across three service lines.", "Grew revenue 90%."] }],
+    highlights: ["Built a customer content program with Sales and 4 experts."],
+    education: ["BA"],
+    skills: ["Leadership"],
+  };
   const ledger = buildLedger(doc, { answers, sources, baseline: { summary: "Generic.", skills: "Leadership" } });
   assert.equal(ledger.items.length, 6);
   assert.equal(ledger.counts.answer, 1);
@@ -97,6 +103,33 @@ test("a broken or hostile saved draft never blanks the app", async () => {
   for (const version of [0, -3, 1.5, "2", NaN]) assert.equal(migrateDraft({ draftVersion: version, meta: { role: "x" } }).meta.role, "x");
   assert.equal(isNewerDraft({ draftVersion: V + 1 }), true);
   assert.equal(migrateDraft({ draftVersion: V + 1 }), null);
+});
+
+test("a v2 draft with a mangled flat resume migrates to the structured model", () => {
+  const v2 = {
+    draftVersion: 2,
+    doc: {
+      name: "Danny Jones",
+      title: "Founder & AI Product Builder",
+      contact: "dannyjones.ai | nolimitjones@gmail.com",
+      summary: "Product builder.",
+      current: "Founder & AI Product Builder, NoLimit Labs (2022 – Present)\nShipped Loomiverse.ai.",
+      tailored: "Built three AI products.",
+      earlier: "1st Assistant Director, Freelance (2017 – Present, selective) undefined",
+      education: "Education",
+      skills: "Product design, Prototyping",
+    },
+  };
+  const migrated = migrateDraft(v2);
+  assert.equal(migrated.draftVersion, 3);
+  const doc = migrated.doc;
+  assert.ok(Array.isArray(doc.roles), "roles is an array");
+  assert.equal(doc.roles[0].title, "Founder & AI Product Builder");
+  assert.equal(doc.roles[0].company, "NoLimit Labs");
+  assert.ok(doc.roles[0].bullets.some((b) => /Loomiverse/.test(b)));
+  assert.ok(!JSON.stringify(doc).includes("undefined"), "no literal undefined survives");
+  assert.deepEqual(doc.highlights, ["Built three AI products."]);
+  assert.deepEqual(doc.skills, ["Product design", "Prototyping"]);
 });
 
 test("the staff pattern does not blow up on hostile input", async () => {

@@ -24,31 +24,49 @@ const doc = (text) => analyzeSources([{ id: "r", kind: "resume", name: "Resume",
 test("a resume with real headings keeps its own summary, skills and education", () => {
   const d = doc(resumeText);
   assert.equal(d.summary, "Marketing manager with nine years in B2B SaaS, leading demand generation and a team of four.");
-  assert.equal(d.skills, "Demand generation, lifecycle email, HubSpot, Looker");
-  assert.equal(d.education, "B.A. Communications, University of Texas at Austin, 2015");
+  assert.deepEqual(d.skills, ["Demand generation", "lifecycle email", "HubSpot", "Looker"]);
+  assert.deepEqual(d.education, ["B.A. Communications, University of Texas at Austin, 2015"]);
 });
 
-test("the newest role is the current role; the rest are earlier, and no heading text leaks into either", () => {
+test("experience splits into structured roles; no heading text leaks into any role", () => {
   const d = doc(resumeText);
-  assert.match(d.current, /Brightwave/);
-  assert.doesNotMatch(d.current, /Cobalt|SUMMARY|EXPERIENCE|EDUCATION|SKILLS/);
-  assert.match(d.earlier, /Cobalt/);
-  assert.match(d.earlier, /Lone Star/);
-  assert.doesNotMatch(d.earlier, /SUMMARY|EDUCATION|SKILLS|B\.A\./);
+  assert.equal(d.roles.length, 3);
+  assert.equal(d.roles[0].title, "Senior Marketing Manager");
+  assert.equal(d.roles[0].company, "Brightwave Software");
+  assert.equal(d.roles[0].dates, "2021 - Present");
+  assert.deepEqual(d.roles[0].bullets, ["Lead a team of four marketers.", "Cut cost per lead 22% by moving budget to intent-based channels."]);
+  assert.equal(d.roles[1].company, "Cobalt Analytics");
+  assert.equal(d.roles[2].company, "Lone Star Outfitters");
+  const flat = JSON.stringify(d.roles);
+  assert.doesNotMatch(flat, /SUMMARY|EXPERIENCE|EDUCATION|SKILLS/);
 });
 
-test("a resume with no headings still uses the old guess, and the sample is unchanged", () => {
+test("a resume with no headings still parses, and the sample is unchanged", () => {
   const sample = doc(sampleSources.find((s) => s.kind === "resume").text);
-  assert.match(sample.current, /Rivermark/);
-  assert.match(sample.earlier, /Lume/);
-  assert.match(sample.education, /Communications/);
+  assert.equal(sample.roles[0].company, "Rivermark Health");
+  assert.equal(sample.roles[0].title, "Senior Brand Marketing Manager");
+  assert.equal(sample.roles[1].company, "Lume Collective");
+  assert.match(sample.education.join(" "), /Communications/);
   assert.match(sample.summary, /Brings cross-functional leadership/);
 });
 
 test("other sections such as certifications are kept, not dropped", () => {
   const d = doc(`${resumeText}\nCERTIFICATIONS\nHubSpot Inbound Certified`);
-  assert.match(d.earlier, /CERTIFICATIONS/);
-  assert.match(d.earlier, /HubSpot Inbound Certified/);
+  assert.match(d.education.join(" "), /HubSpot Inbound Certified/);
+});
+
+test("headings glued to line starts are detected", () => {
+  const d = doc(`Ava Chen\nDesigner\nava@example.com\nSummary Product designer with six years in SaaS.\nExperience\nDesigner, Northwind (2019 - Present)\nShipped the billing revamp.`);
+  assert.equal(d.summary, "Product designer with six years in SaaS.");
+  assert.equal(d.roles[0].title, "Designer");
+  assert.equal(d.roles[0].company, "Northwind");
+});
+
+test("a wrapped LinkedIn-style line still splits roles on date ranges", () => {
+  const d = doc(`Sam Park\nFounder\nsam@example.com\nFounder, NoLimit Labs (2022 -\nPresent) Shipped three apps.\nDesigner, Studio K (2019 - 2021)\nRan the rebrand.`);
+  assert.equal(d.roles.length, 2);
+  assert.equal(d.roles[0].dates, "2022 - Present");
+  assert.match(d.roles[0].bullets.join(" "), /Shipped three apps/);
 });
 
 import { proposeResumeUpdate } from "../src/lib/analyze.js";
