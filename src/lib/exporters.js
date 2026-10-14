@@ -155,17 +155,27 @@ export async function exportResume(rawDoc, format) {
     };
     const writeRole = (role) => {
       const head = roleHeadline(role);
-      need(16);
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(11);
-      const headWidth = Math.min(pdf.getTextWidth(head), width - (role.dates ? 140 : 0));
-      pdf.text(head, margin, y, { maxWidth: headWidth });
-      if (role.dates) {
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(10);
-        pdf.text(role.dates, right, y, { align: "right" });
-      }
-      y += 15;
+      const headWidth = width - (role.dates ? 140 : 0);
+      // A long headline wraps to 2 lines; draw it line by line and advance
+      // past the LAST line, or the first bullet lands on top of the header
+      // (the old code drew with maxWidth but advanced a fixed 15pt).
+      const headLines = pdf.splitTextToSize(head, headWidth);
+      const headLineHeight = 11 * 1.35;
+      need(headLines.length * headLineHeight + 2);
+      headLines.forEach((line, index) => {
+        pdf.text(line, margin, y);
+        if (index === 0 && role.dates) {
+          pdf.setFont("helvetica", "normal");
+          pdf.setFontSize(10);
+          pdf.text(role.dates, right, y, { align: "right" });
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(11);
+        }
+        y += headLineHeight;
+      });
+      y += 2;
       for (const bullet of role.bullets) {
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(10.5);

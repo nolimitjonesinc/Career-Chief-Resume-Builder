@@ -102,3 +102,34 @@ test("pdfItemsToLines ignores empty items", () => {
   ];
   assert.deepEqual(pdfItemsToLines(items), ["Only"]);
 });
+
+test("PDF role headers never overlap bullets when the headline wraps", async () => {
+  // A headline wider than the dates-reserved width wraps to 2 lines; the
+  // first bullet must start below the header's LAST line, not on top of it.
+  // Positions come from pdf.js: larger transform[5] = higher on the page.
+  let capturedBlob = null;
+  const realCreateObjectURL = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (blob) => { capturedBlob = blob; return realCreateObjectURL(blob); };
+  globalThis.window = { setTimeout: (fn) => setTimeout(fn, 0), atob: globalThis.atob.bind(globalThis), btoa: globalThis.btoa.bind(globalThis) };
+  globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } };
+  const { exportResume } = await import("../src/lib/exporters.js");
+  const doc = {
+    name: "Jordan Avery", title: "Product Leader", contact: "jordan@example.com",
+    summary: "Product leader.",
+    roles: [{ title: "Senior Vice President of Global Brand Marketing and Communications", company: "International Conglomerate Holdings Inc", dates: "2019 – Present", bullets: ["Own the global brand.", "Second bullet."] }],
+    highlights: [], education: [], skills: [], interests: "",
+  };
+  await exportResume(doc, "pdf");
+  assert.ok(capturedBlob, "no PDF blob captured");
+  const bytes = new Uint8Array(await capturedBlob.arrayBuffer());
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const content = await (await pdf.getPage(1)).getTextContent();
+  const items = content.items.filter((it) => it.str.trim()).map((it) => ({ y: Math.round(it.transform[5]), str: it.str }));
+  const headerYs = items.filter((it) => /Senior Vice President|Communications, International/.test(it.str)).map((it) => it.y);
+  assert.ok(headerYs.length >= 2, `headline should wrap to 2 lines, got ${headerYs.length}`);
+  const firstBullet = items.find((it) => it.str === "•");
+  assert.ok(firstBullet, "no bullet found");
+  const gap = Math.min(...headerYs) - firstBullet.y;
+  assert.ok(gap >= 8, `first bullet overlaps header: gap ${gap}pt`);
+});

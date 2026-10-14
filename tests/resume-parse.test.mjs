@@ -75,3 +75,28 @@ test("a contraction at the start of an answer does not leak first person into th
   assert.match(line, /^Directly managed 4 marketers/);
   assert.doesNotMatch(line, /^I/);
 });
+
+test("repeated per-page headers never become bullets", () => {
+  // LinkedIn stamps "Danny Jones Resume" + "Page X of Y" on every page.
+  // When the footer splits across extraction lines, the name half survives
+  // the footer strip — it must not parse as a bullet, nor may a name
+  // fragment stranded after a date range ("(2009 - 2017) Danny").
+  const d = doc(`Danny Jones
+Founder & AI Product Builder | 1st Assistant Director
+Los Angeles, CA | dannyjones.ai | nolimitjones@gmail.com | 605-484-3913
+Summary Product builder with 4 years of shipping apps.
+Experience Founder & AI Product Builder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products end to end.
+Key 2nd Assistant Director, Freelance (2009 - 2017) Danny
+Danny Jones Resume
+Supervised 2nd ADs and PAs.
+Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and landscapes. Teamed with Danny Jones on the launch.`);
+  const flat = JSON.stringify(d.roles);
+  assert.doesNotMatch(flat, /"Danny"/);
+  assert.doesNotMatch(flat, /Danny Jones Resume/);
+  const second = d.roles.find((r) => r.title === "Key 2nd Assistant Director");
+  assert.deepEqual(second.bullets, ["Supervised 2nd ADs and PAs."]);
+  const photo = d.roles.find((r) => r.title === "Photographer");
+  assert.ok(photo.bullets.some((b) => /Teamed with Danny Jones on the launch/.test(b)), "a bullet that merely mentions the name survives");
+});

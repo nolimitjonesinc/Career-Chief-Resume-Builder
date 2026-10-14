@@ -123,6 +123,25 @@ const PHONE_RE = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
 const URL_RE = /\b((?:https?:\/\/)?(?:www\.)?(?:linkedin\.com\/[^\s|·,;]+|[a-z0-9-]+\.(?:com|ai|io|dev|me|co|net|org|us)(?:\/[^\s|·,;]*)?))/i;
 const LOCATION_RE = /\b([A-Z][a-z]+(?: [A-Z][a-z]+)?,\s*[A-Z]{2})\b/;
 const JUNK_LINE = /^(undefined|null|nan|none)$/i;
+// A repeated per-page header ("Danny Jones Resume", or a fragment of one) is
+// layout, not content. LinkedIn stamps it on every page; when the page
+// footer splits across extraction lines, the "Page X of Y" half is stripped
+// by ingest clean() but the name half survives and would parse as a bullet.
+// Only applied to lines that ARE a contiguous fragment of the name + "Resume"
+// sequence ("Danny", "Danny Jones", "Jones Resume", "Resume") — never to a
+// line that merely mentions the name inside a sentence.
+const normHeader = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function isPageHeaderJunk(line, name) {
+  const text = normHeader(line);
+  if (!text) return false;
+  const nameWords = [...normHeader(name || "").split(" ").filter(Boolean), "resume"];
+  const lineWords = text.split(" ").filter(Boolean);
+  if (lineWords.length > nameWords.length) return false;
+  for (let start = 0; start + lineWords.length <= nameWords.length; start++) {
+    if (nameWords.slice(start, start + lineWords.length).join(" ") === text) return true;
+  }
+  return false;
+}
 const BULLET_GLYPH = /^[•\-\*·▪◦‣]+\s*/;
 // The app's own draft prompts ("Add earlier roles…", "Contact details") are
 // not resume content — dropped when a Career Chief export is re-uploaded.
@@ -376,7 +395,7 @@ const dedupeLines = (lines) => {
 // role's header — narrow-column PDFs often wrap "…Founder &" / "AI Product
 // Builder, … (2022 –" across lines. Repeated roles and bullets (a PDF that
 // prints its content twice) collapse into one.
-function splitRoles(lines) {
+function splitRoles(lines, name = "") {
   const roles = [];
   let pending = [];
   for (const line of lines) {
@@ -399,7 +418,10 @@ function splitRoles(lines) {
       // Bullet spill: a long title starting with lowercase words ("landscapes
       // Mount Rushmore…") loses the spill.
       if (title.split(/\s+/).filter(Boolean).length > 3) title = title.replace(/^(?:[a-z][\w&'-]*\s+)+/, "").trim();
-      roles.push({ title, company, dates: match[0].trim(), bullets: after ? [after] : [] });
+      // A page-header fragment stranded after a date range ("(2009 – 2017)
+      // Danny") is layout, not a bullet.
+      const afterBullet = after && !isPageHeaderJunk(after, name) ? [after] : [];
+      roles.push({ title, company, dates: match[0].trim(), bullets: afterBullet });
     } else if (roles.length) {
       roles.at(-1).bullets.push(line);
     } else {
@@ -432,6 +454,11 @@ export function parseResumeText(resumeText) {
     return { name: "", title: "", contact: "", summary: "", roles: [], highlights: [], education: [], skills: [], interests: "" };
   }
   const { name, title, contact, rest } = parseHeader(rejoinWrapped(rawLines));
+  // Drop repeated per-page headers that survived extraction ("Danny Jones
+  // Resume", bare name lines) before they can parse as bullets. The real
+  // header block was already consumed by parseHeader, so a line that IS the
+  // name out here is layout, not content.
+  const content = rest.filter((line) => !isPageHeaderJunk(line, name));
   const sections = { summary: [], experience: [], education: [], skills: [], interests: [], other: [], drop: [] };
   let at = null;
   const feedText = (heading, text) => {
@@ -464,16 +491,16 @@ export function parseResumeText(resumeText) {
     }
     for (const segment of splitLineOnHeading(line)) feedText(segment.heading, segment.text);
   };
-  for (const line of rest) feedLine(line);
+  for (const line of content) feedLine(line);
   for (const key of Object.keys(sections)) sections[key] = sections[key].filter((line) => !isPrompt(line));
   // No headings at all: leading lines without date ranges are the summary,
   // everything from the first role header on is experience.
   if (!at && !sections.experience.length) {
-    const firstRole = rest.findIndex((line) => DATE_RANGE.test(line));
-    const lead = firstRole < 0 ? rest : rest.slice(0, firstRole);
+    const firstRole = content.findIndex((line) => DATE_RANGE.test(line));
+    const lead = firstRole < 0 ? content : content.slice(0, firstRole);
     sections.summary.push(...lead.filter((line) => !EDUCATION_HINT.test(line)));
     sections.education.push(...lead.filter((line) => EDUCATION_HINT.test(line)));
-    if (firstRole >= 0) sections.experience.push(...rest.slice(firstRole));
+    if (firstRole >= 0) sections.experience.push(...content.slice(firstRole));
   }
   // Stray education lines hiding in experience (no heading case) get rescued.
   const rescued = [];
@@ -491,7 +518,7 @@ export function parseResumeText(resumeText) {
   return {
     name, title, contact,
     summary: sections.summary.join(" ").trim(),
-    roles: splitRoles(sections.experience),
+    roles: splitRoles(sections.experience, name),
     highlights: [],
     education: education.map((line) => line.trim()).filter(Boolean),
     skills,
