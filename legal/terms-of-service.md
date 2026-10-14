@@ -17,7 +17,7 @@ Career Chief helps you build and tailor resumes, including with AI-generated dra
 **Pro plans (one-time payments, USD):**
 - 30-Day Pass — $29, Pro for 30 days from purchase
 - 1-Year Pro — $79, Pro for 1 year from purchase
-- Lifetime Pro — $149, Pro forever, for as long as Career Chief is offered (see section 8)
+- Lifetime Pro — $149, Pro forever, for as long as Career Chief is offered (see section 7)
 
 **What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro — lifetime or otherwise.
 
@@ -63,7 +63,7 @@ We may update, change, or discontinue features at any time. "Lifetime" / "foreve
 
 ## 8. Limitation of liability
 
-To the maximum extent allowed by law, our total liability for any claim related to the service is limited to **the amount you paid us** (through Lemon Squeezy) in the 12 months before the claim. We are not liable for indirect, incidental, or consequential damages — including lost job opportunities or income.
+To the maximum extent allowed by law, our total liability for any claim related to the service is limited to **the amount you paid for your Pro license** (through Lemon Squeezy). We are not liable for indirect, incidental, or consequential damages — including lost job opportunities or income.
 
 ## 9. Governing law
 

@@ -9,6 +9,7 @@ import {
 import { acceptedFiles, extractFile, extractUrl } from "./lib/ingest";
 import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource, proposeResumeUpdate, sampleSources, sourceLabels, textToRoles } from "./lib/analyze";
 import { DRAFT_VERSION, isNewerDraft, migrateDraft, storageKey } from "./lib/draft";
+import { aiFollowUpAllowed, aiPlanAllowed } from "./lib/ai-consent";
 import { buildLedger } from "./lib/evidence";
 import { compareJobs } from "./lib/compare";
 import { roleHeader, splitRole, tailorByRules } from "./lib/tailor";
@@ -72,6 +73,7 @@ export function App() {
   const [aiProvider, setAiProvider] = useState("openai");
   const [tailorState, setTailorState] = useState({ status: "idle" });
   // Consent is per session (Rule 8): it is deliberately not restored from the saved draft.
+  // The workspace AI toggle and the intake checkbox flip this same session-scoped state.
   const [aiConsent, setAiConsent] = useState(false);
   // Pro license: "checking" on load, then "pro" or "free". The free tier is the
   // default and is never locked out; a failed check fails closed to free.
@@ -185,7 +187,7 @@ export function App() {
     setSources(next);
     if (analysis) {
       refreshAnalysis(next);
-      if (analysis.researchMode === "ai" && aiConsent) {
+      if (aiFollowUpAllowed(analysis.researchMode, aiConsent)) {
         const combined = [...next];
         if (resumeText.trim()) combined.unshift({ id: "pasted-resume", kind: "resume", name: "Pasted resume", text: resumeText.trim() });
         if (jobText.trim()) combined.push({ id: "pasted-job", kind: "job", name: "Job description", text: jobText.trim() });
@@ -218,7 +220,7 @@ export function App() {
     setQuestionIndex(0);
     setScreen("analysis");
     setNotice("");
-    if (aiEnabled && aiConsent) runAiPlan(intakeSources);
+    if (aiPlanAllowed(aiEnabled, aiConsent)) runAiPlan(intakeSources);
   }
 
   async function runAiPlan(nextSources, targetMeta = meta, preserveProgress = false) {
@@ -283,7 +285,7 @@ export function App() {
     if (!currentQuestion || !answer.trim()) return;
     setPendingFollowUp(null);
     let proposed = proposeResumeUpdate(doc, currentQuestion, answer);
-    if (analysis?.researchMode === "ai" && aiConsent) {
+    if (aiFollowUpAllowed(analysis?.researchMode, aiConsent)) {
       setBusy("Checking your answer against the hiring case…");
       try {
         const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer, priorAnswers: answers, askedTopics: questions.slice(0, questionIndex + 1).map((item) => item.topic), pendingTopics: questions.slice(questionIndex + 1).map((item) => item.topic) }) });
@@ -328,7 +330,7 @@ export function App() {
   async function startTailor() {
     const { header, bullets } = splitRole(doc.roles?.[0]);
     setModal("tailor");
-    if (analysis?.researchMode === "ai" && aiConsent) {
+    if (aiFollowUpAllowed(analysis?.researchMode, aiConsent)) {
       setTailorState({ status: "loading" });
       try {
         const response = await fetch("/api/ai/tailor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, company: meta.company, summary: doc.summary, header, bullets, skills: (doc.skills || []).join(" · "), answers: answers.map((item) => item.text), priorities: (analysis.requirements || []).map((item) => item.label || item.key) }) });
@@ -526,7 +528,7 @@ export function App() {
     setHistory([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
     setNewOpportunity({ company: "", role: "", job: "" });
     setNotice("New opportunity created from your career evidence. Its hiring case and resume are ready to refine.");
-    if (aiEnabled && aiConsent) runAiPlan(nextSources, nextMeta);
+    if (aiPlanAllowed(aiEnabled, aiConsent)) runAiPlan(nextSources, nextMeta);
   }
 
   function clearLocalDraft() {
@@ -558,7 +560,7 @@ export function App() {
     {screen === "workspace" && analysis && doc && <>
       <div className="opportunity-bar">
         <button className="opportunity-name" onClick={() => setModal("opportunity")}><span className="eyebrow">WORKING TOWARD</span><strong>{meta.company || "Target company"} <span>/ {meta.role}</span></strong><CaretDown size={16} /></button>
-        <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span><button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
+        <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span>{aiEnabled && <label className="ai-toggle"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span>AI {aiConsent ? "on" : "off"}</span></label>}<button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
       </div>
       <nav className="workspace-nav" aria-label="Workspace">
         {[['case','Your hiring case'],['research','Company & role'],['interview',researching ? "Interview plan · preparing…" : `Interview plan · ${completed}/${questions.length}`],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} disabled={id === "interview" && researching} onClick={() => setTab(id)}>{label}</button>)}
@@ -584,7 +586,7 @@ export function App() {
       <div className="dialog-top"><span className="eyebrow">Career Chief</span><button autoFocus aria-label="Close panel" onClick={() => setModal(null)}><X size={23} /></button></div>
       {modal === "source-add" && <SourceForm draft={sourceDraft} setDraft={setSourceDraft} prepareFile={prepareDraftFile} save={saveSourceDraft} busy={Boolean(busy)} />}
       {modal === "source-view" && selectedSource && <SourceView source={selectedSource} />}
-      {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={proposalSupports} canRevise={analysis?.researchMode === "ai" && aiConsent} revise={reviseProposal} />}
+      {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={proposalSupports} canRevise={aiFollowUpAllowed(analysis?.researchMode, aiConsent)} revise={reviseProposal} />}
       {modal === "ledger" && ledger && <><h2>Where each line came from.</h2><EvidenceLedger ledger={ledger} /></>}
       {modal === "editor" && <ResumeEditor doc={doc} save={saveEditor} />}
       {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} tailor={startTailor} pro={pro} openPro={openPro} />}
