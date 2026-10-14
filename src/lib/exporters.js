@@ -1,65 +1,7 @@
+import { exportView, escapeHtml, resumeBodyHtml, roleHeadline, sanitizeDoc } from "./resume-view.js";
+export { PLACEHOLDERS, exportView, sanitizeDoc } from "./resume-view.js";
+
 const safeName = (value) => (value || "").trim().replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "resume";
-
-// Prompts shown in the on-screen working draft that must never reach a paid
-// export. A buyer exporting before finishing the interview would otherwise
-// pay for a file that says "Add your most recent role and accomplishments."
-export const PLACEHOLDERS = new Set([
-  "Add your most recent role and accomplishments.",
-  "Add earlier roles that strengthen this case.",
-  "Add an accomplishment supported by your career history.",
-  "Contact details",
-  "Your name",
-  "Professional title",
-  "Education",
-]);
-
-const JUNK = /^(undefined|null|nan)$/i;
-const cleanText = (value) => {
-  const text = String(value ?? "").trim();
-  return PLACEHOLDERS.has(text) || JUNK.test(text) ? "" : text;
-};
-const cleanList = (values) => (Array.isArray(values) ? values : String(values ?? "").split("\n"))
-  .map((item) => cleanText(item)).filter(Boolean);
-
-// Returns the doc with placeholder prompts and junk removed (same shape).
-// The on-screen draft keeps its prompts; only exports are cleaned.
-export function sanitizeDoc(rawDoc) {
-  const doc = rawDoc || {};
-  return {
-    name: cleanText(doc.name),
-    title: cleanText(doc.title),
-    contact: cleanText(doc.contact),
-    summary: cleanText(doc.summary),
-    roles: (Array.isArray(doc.roles) ? doc.roles : []).map((role) => ({
-      title: cleanText(role.title),
-      company: cleanText(role.company),
-      dates: cleanText(role.dates),
-      bullets: cleanList(role.bullets),
-    })).filter((role) => role.title || role.company || role.bullets.length),
-    // Approved interview lines never get a section of their own in a paid
-    // export; they ride along as bullets under the newest role instead.
-    highlights: cleanList(doc.highlights),
-    education: cleanList(doc.education),
-    skills: cleanList(doc.skills),
-    interests: cleanText(doc.interests),
-  };
-}
-
-// The export view of a doc: highlights folded into the newest role's bullets,
-// so approved interview lines reach the paid file without their own section.
-export function exportView(rawDoc) {
-  const doc = sanitizeDoc(rawDoc);
-  const roles = doc.roles.map((role) => ({ ...role }));
-  if (doc.highlights.length && roles.length) {
-    roles[0] = { ...roles[0], bullets: [...doc.highlights, ...roles[0].bullets] };
-  } else if (doc.highlights.length) {
-    roles.push({ title: "", company: "", dates: "", bullets: [...doc.highlights] });
-  }
-  return { ...doc, roles };
-}
-
-const roleHeadline = (role) => [role.title, role.company].filter(Boolean).join(", ");
-const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 
 function save(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -92,24 +34,11 @@ function toText(doc) {
 }
 
 function toHtml(doc) {
-  const head = [
-    doc.name ? `<h1>${escapeHtml(doc.name)}</h1>` : "",
-    doc.title ? `<h2>${escapeHtml(doc.title)}</h2>` : "",
-    doc.contact ? `<p class="contact">${escapeHtml(doc.contact)}</p>` : "",
-    doc.summary ? `<h3>Summary</h3><p class="summary">${escapeHtml(doc.summary)}</p>` : "",
-  ].join("");
-  const roleHtml = (role) => {
-    const headLine = `<div class="role-head"><strong>${escapeHtml(roleHeadline(role))}</strong>${role.dates ? `<span class="dates">${escapeHtml(role.dates)}</span>` : ""}</div>`;
-    const bullets = role.bullets.length ? `<ul>${role.bullets.map((bullet) => `<li>${escapeHtml(bullet)}</li>`).join("")}</ul>` : "";
-    return headLine + bullets;
-  };
-  const sections = [
-    doc.roles.length ? `<h3>Experience</h3>${doc.roles.map(roleHtml).join("")}` : "",
-    doc.education.length ? `<h3>Education</h3><ul>${doc.education.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>` : "",
-    doc.skills.length ? `<h3>Skills</h3><p>${escapeHtml(doc.skills.join(" · "))}</p>` : "",
-    doc.interests ? `<h3>Interests</h3><p>${escapeHtml(doc.interests)}</p>` : "",
-  ].join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(doc.name || "Resume")}</title><style>body{max-width:760px;margin:48px auto;padding:0 28px;color:#17212b;font:15px/1.55 Arial,sans-serif}h1{font:42px/1.05 Georgia,serif;margin:0}h2{font:20px Georgia,serif;margin:5px 0}.contact{color:#65716c;font-size:12px}.summary{font-size:16px}h3{font:700 13px Georgia,serif;letter-spacing:.06em;text-transform:uppercase;border-top:1px solid #ccd4cf;padding-top:14px;margin-top:25px}.role-head{display:flex;justify-content:space-between;gap:16px;margin:14px 0 4px}.dates{color:#65716c;white-space:nowrap}ul{margin:4px 0 10px;padding-left:20px}li{margin-bottom:4px}</style></head><body>${head}${sections}</body></html>`;
+  // `doc` is already an export view (exportResume applies exportView first).
+  // The body is the canonical resume markup shared with the on-screen
+  // preview; the styles below are the export's long-standing ones and are
+  // pinned byte-for-byte by tests.
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(doc.name || "Resume")}</title><style>body{max-width:760px;margin:48px auto;padding:0 28px;color:#17212b;font:15px/1.55 Arial,sans-serif}h1{font:42px/1.05 Georgia,serif;margin:0}h2{font:20px Georgia,serif;margin:5px 0}.contact{color:#65716c;font-size:12px}.summary{font-size:16px}h3{font:700 13px Georgia,serif;letter-spacing:.06em;text-transform:uppercase;border-top:1px solid #ccd4cf;padding-top:14px;margin-top:25px}.role-head{display:flex;justify-content:space-between;gap:16px;margin:14px 0 4px}.dates{color:#65716c;white-space:nowrap}ul{margin:4px 0 10px;padding-left:20px}li{margin-bottom:4px}</style></head><body>${resumeBodyHtml(doc)}</body></html>`;
 }
 
 export async function exportResume(rawDoc, format) {

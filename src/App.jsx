@@ -25,6 +25,8 @@ import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
 import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
 import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
+import { applyPreviewEdit } from "./lib/resume-view";
+import { ResumePreview } from "./components/ResumePreview";
 import { blankJob, starterReady, starterResumeText } from "./lib/starter";
 
 const blankMeta = { company: "", role: "" };
@@ -410,6 +412,13 @@ export function App() {
     setNotice("The previous resume wording was restored. Your evidence stays in the career record.");
   }
 
+  function saveInlineEdit(edit) {
+    setHistory((items) => [...items, { ...doc }]);
+    setDoc((value) => applyPreviewEdit(value, edit));
+    setManualEdit(true);
+    setNotice("Your edit is saved. Future suggestions still require your approval.");
+  }
+
   function saveEditor(value) {
     setHistory((items) => [...items, { ...doc }]);
     setDoc(value);
@@ -564,7 +573,7 @@ export function App() {
         </main>
         <aside className="resume-pane">
           <div className="resume-top"><div><span>Working resume</span><small>Available from the start</small></div><button className="text-action" onClick={() => setModal("editor")}><ArrowSquareOut size={17} /> Open & edit</button></div>
-          <Resume doc={doc} answered={answers.length} />
+          <ResumePreview doc={doc} onEdit={saveInlineEdit} />
           {ledger && <div className="resume-ledger"><LedgerButton ledger={ledger} open={() => setModal("ledger")} /></div>}
           <div className="resume-foot"><span>{manualEdit ? "Your manual wording is protected." : "All proposed changes require approval."}</span><button className="text-action" disabled={!history.length} onClick={undoResume}><ArrowCounterClockwise size={16} /> Undo</button></div>
         </aside>
@@ -705,10 +714,6 @@ function Interview({ questions, index, status, answer, setAnswer, review, skip, 
 function CareerEvidence({ sources, answers, inspect, add, clear }) {
   const career = sources.filter(isCareerSource);
   return <><span className="eyebrow">Your reusable career record</span><h1>Remember it once.<br/>Use it thoughtfully.</h1><p className="lead">Career evidence can support more than one application. Each company still gets its own strategy and resume draft.</p><div className="section-title"><div><h3>Career sources</h3><p>Documents and context you supplied.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add context</button></div>{career.map((source) => <button className="evidence-card" key={source.id} onClick={() => inspect(source)}><span className="badge">{sourceLabels[source.kind]} · supplied</span><strong>{source.name}</strong><p>{source.text.slice(0, 180)}{source.text.length > 180 ? "…" : ""}</p></button>)}<div className="section-title answer-title"><div><h3>Evidence gathered in the interview</h3><p>These answers are user-supplied, not independently verified.</p></div><span className="count-pill">{answers.length}</span></div>{answers.length ? answers.map((item) => <article className="answer-evidence" key={item.id}><span className="badge">{item.topic}</span><p>{item.text}</p><small>Resume wording: {item.resumeLine}</small></article>) : <div className="empty-card">Useful answers will collect here as you work through the question plan.</div>}<button className="text-action" onClick={clear}>Clear saved draft from this device</button></>;
-}
-
-function Resume({ doc, answered }) {
-  return <article className="resume"><h2>{doc.name}</h2><div className="resume-title">{doc.title}</div><p className="contact">{doc.contact}</p><p>{doc.summary}</p><h4>Experience</h4>{(doc.roles || []).map((role, index) => <div className="resume-role" key={index}><p className="role-head"><strong>{[role.title, role.company].filter(Boolean).join(", ")}</strong>{role.dates && <span className="role-dates"> · {role.dates}</span>}</p><ul>{(role.bullets || []).map((bullet, bulletIndex) => <li key={bulletIndex}>{bullet}</li>)}</ul></div>)}{(doc.highlights || []).length > 0 && <><h4>New lines from your answers</h4><ul className={answered ? "tailored updated" : "tailored"}>{doc.highlights.map((line, index) => <li key={index}>{line}</li>)}</ul>{answered > 0 && <span className="resume-tag">Updated from your answers</span>}</>}{doc.education?.length > 0 && <><h4>Education</h4><ul>{doc.education.map((line, index) => <li key={index}>{line}</li>)}</ul></>}{doc.skills?.length > 0 && <><h4>Capabilities</h4><p>{(Array.isArray(doc.skills) ? doc.skills : String(doc.skills).split("\n")).join(" · ")}</p></>}{doc.interests && <><h4>Interests</h4><p>{doc.interests}</p></>}<p className="demo-doc">WORKING DRAFT · REVIEW BEFORE USE</p></article>;
 }
 
 function SourceForm({ draft, setDraft, prepareFile, save, busy }) {
