@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { sanitizeDoc } = await import("../src/lib/exporters.js");
+const { sanitizeDoc, exportView } = await import("../src/lib/exporters.js");
 const { extractFile, pdfItemsToLines } = await import("../src/lib/ingest.js");
 
 const fullDoc = {
@@ -12,11 +12,14 @@ const fullDoc = {
   title: "Founder & AI Product Builder",
   contact: "dannyjones.ai | nolimitjones@gmail.com | 605-484-3913",
   summary: "Product builder with 4 years of shipping apps.",
-  current: "Founder & AI Product Builder, NoLimit Labs (2022 – Present)\nShipped Loomiverse.ai.",
-  tailored: "Built and launched three AI products used by real customers.",
-  earlier: "1st Assistant Director, Freelance (2017 – Present)",
-  education: "Black Hills State University (1992-1993)",
-  skills: "Product design · Rapid prototyping",
+  roles: [
+    { title: "Founder & AI Product Builder", company: "NoLimit Labs", dates: "2022 – Present", bullets: ["Shipped Loomiverse.ai."] },
+    { title: "1st Assistant Director", company: "Freelance", dates: "2017 – Present", bullets: [] },
+  ],
+  highlights: ["Built and launched three AI products used by real customers."],
+  education: ["Black Hills State University (1992-1993)"],
+  skills: ["Product design", "Rapid prototyping"],
+  interests: "",
 };
 
 test("sanitizeDoc keeps real content untouched", () => {
@@ -29,26 +32,31 @@ test("sanitizeDoc strips every known draft prompt", () => {
     name: "Your name",
     title: "Professional title",
     contact: "Contact details",
-    current: "Add your most recent role and accomplishments.",
-    tailored: "Add an accomplishment supported by your career history.",
-    earlier: "Add earlier roles that strengthen this case.",
-    education: "Education",
+    summary: "Add an accomplishment supported by your career history.",
+    roles: [{ title: "Add your most recent role and accomplishments.", company: "", dates: "", bullets: ["undefined"] }],
+    highlights: ["Add an accomplishment supported by your career history."],
+    education: ["Education"],
   };
   const clean = sanitizeDoc(dirty);
   assert.equal(clean.name, "");
   assert.equal(clean.title, "");
   assert.equal(clean.contact, "");
-  assert.equal(clean.current, "");
-  assert.equal(clean.tailored, "");
-  assert.equal(clean.earlier, "");
-  assert.equal(clean.education, "");
+  assert.equal(clean.summary, "");
+  assert.deepEqual(clean.roles, []);
+  assert.deepEqual(clean.highlights, []);
+  assert.deepEqual(clean.education, []);
   // Untouched fields survive.
-  assert.equal(clean.summary, fullDoc.summary);
-  assert.equal(clean.skills, fullDoc.skills);
+  assert.deepEqual(clean.skills, fullDoc.skills);
 });
 
 test("sanitizeDoc keeps the same shape (exporters rely on every key)", () => {
   assert.deepEqual(Object.keys(sanitizeDoc({})).sort(), Object.keys(fullDoc).sort());
+});
+
+test("exportView folds highlights into the newest role instead of a section", () => {
+  const view = exportView(fullDoc);
+  assert.equal(view.roles[0].bullets[0], "Built and launched three AI products used by real customers.");
+  assert.equal(view.roles[0].bullets[1], "Shipped Loomiverse.ai.");
 });
 
 test("extractFile strips 'Page X of Y' footers from source files", async () => {
@@ -93,4 +101,35 @@ test("pdfItemsToLines ignores empty items", () => {
     { str: "Only", transform: [1, 0, 0, 1, 72, 700] },
   ];
   assert.deepEqual(pdfItemsToLines(items), ["Only"]);
+});
+
+test("PDF role headers never overlap bullets when the headline wraps", async () => {
+  // A headline wider than the dates-reserved width wraps to 2 lines; the
+  // first bullet must start below the header's LAST line, not on top of it.
+  // Positions come from pdf.js: larger transform[5] = higher on the page.
+  let capturedBlob = null;
+  const realCreateObjectURL = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (blob) => { capturedBlob = blob; return realCreateObjectURL(blob); };
+  globalThis.window = { setTimeout: (fn) => setTimeout(fn, 0), atob: globalThis.atob.bind(globalThis), btoa: globalThis.btoa.bind(globalThis) };
+  globalThis.document = { createElement: () => ({ click() {}, remove() {} }), body: { appendChild() {} } };
+  const { exportResume } = await import("../src/lib/exporters.js");
+  const doc = {
+    name: "Jordan Avery", title: "Product Leader", contact: "jordan@example.com",
+    summary: "Product leader.",
+    roles: [{ title: "Senior Vice President of Global Brand Marketing and Communications", company: "International Conglomerate Holdings Inc", dates: "2019 – Present", bullets: ["Own the global brand.", "Second bullet."] }],
+    highlights: [], education: [], skills: [], interests: "",
+  };
+  await exportResume(doc, "pdf");
+  assert.ok(capturedBlob, "no PDF blob captured");
+  const bytes = new Uint8Array(await capturedBlob.arrayBuffer());
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+  const content = await (await pdf.getPage(1)).getTextContent();
+  const items = content.items.filter((it) => it.str.trim()).map((it) => ({ y: Math.round(it.transform[5]), str: it.str }));
+  const headerYs = items.filter((it) => /Senior Vice President|Communications, International/.test(it.str)).map((it) => it.y);
+  assert.ok(headerYs.length >= 2, `headline should wrap to 2 lines, got ${headerYs.length}`);
+  const firstBullet = items.find((it) => it.str === "•");
+  assert.ok(firstBullet, "no bullet found");
+  const gap = Math.min(...headerYs) - firstBullet.y;
+  assert.ok(gap >= 8, `first bullet overlaps header: gap ${gap}pt`);
 });

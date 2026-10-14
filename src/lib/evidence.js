@@ -68,8 +68,16 @@ export function buildLedger(doc, context) {
   const prepared = prepare(context.sources || []);
   const known = knownNumbers([...(context.answers || []).map((item) => item.text), ...(context.sources || []).map((item) => item.text)]);
   const items = [];
-  for (const [field, label] of ledgerFields) {
-    String(doc?.[field] || "").split("\n").map((line) => line.trim()).filter(Boolean).forEach((line, index) => {
+  const roleHead = (role) => [[role.title, role.company].filter(Boolean).join(", "), role.dates].filter(Boolean).join(" — ");
+  const fields = [
+    ["summary", "Summary", [doc?.summary]],
+    ["experience", "Experience", (doc?.roles || []).flatMap((role) => [roleHead(role), ...(role.bullets || [])])],
+    ["highlights", "New lines from your answers", doc?.highlights || []],
+    ["education", "Education", doc?.education || []],
+    ["skills", "Capabilities", doc?.skills || []],
+  ];
+  for (const [field, label, lines] of fields) {
+    lines.map((line) => String(line || "").trim()).filter(Boolean).forEach((line, index) => {
       items.push({ id: `${field}-${index}`, field, section: label, line, ...traceLine(line, { ...context, field, prepared, known }) });
     });
   }

@@ -24,31 +24,49 @@ const doc = (text) => analyzeSources([{ id: "r", kind: "resume", name: "Resume",
 test("a resume with real headings keeps its own summary, skills and education", () => {
   const d = doc(resumeText);
   assert.equal(d.summary, "Marketing manager with nine years in B2B SaaS, leading demand generation and a team of four.");
-  assert.equal(d.skills, "Demand generation, lifecycle email, HubSpot, Looker");
-  assert.equal(d.education, "B.A. Communications, University of Texas at Austin, 2015");
+  assert.deepEqual(d.skills, ["Demand generation", "lifecycle email", "HubSpot", "Looker"]);
+  assert.deepEqual(d.education, ["B.A. Communications, University of Texas at Austin, 2015"]);
 });
 
-test("the newest role is the current role; the rest are earlier, and no heading text leaks into either", () => {
+test("experience splits into structured roles; no heading text leaks into any role", () => {
   const d = doc(resumeText);
-  assert.match(d.current, /Brightwave/);
-  assert.doesNotMatch(d.current, /Cobalt|SUMMARY|EXPERIENCE|EDUCATION|SKILLS/);
-  assert.match(d.earlier, /Cobalt/);
-  assert.match(d.earlier, /Lone Star/);
-  assert.doesNotMatch(d.earlier, /SUMMARY|EDUCATION|SKILLS|B\.A\./);
+  assert.equal(d.roles.length, 3);
+  assert.equal(d.roles[0].title, "Senior Marketing Manager");
+  assert.equal(d.roles[0].company, "Brightwave Software");
+  assert.equal(d.roles[0].dates, "2021 - Present");
+  assert.deepEqual(d.roles[0].bullets, ["Lead a team of four marketers.", "Cut cost per lead 22% by moving budget to intent-based channels."]);
+  assert.equal(d.roles[1].company, "Cobalt Analytics");
+  assert.equal(d.roles[2].company, "Lone Star Outfitters");
+  const flat = JSON.stringify(d.roles);
+  assert.doesNotMatch(flat, /SUMMARY|EXPERIENCE|EDUCATION|SKILLS/);
 });
 
-test("a resume with no headings still uses the old guess, and the sample is unchanged", () => {
+test("a resume with no headings still parses, and the sample is unchanged", () => {
   const sample = doc(sampleSources.find((s) => s.kind === "resume").text);
-  assert.match(sample.current, /Rivermark/);
-  assert.match(sample.earlier, /Lume/);
-  assert.match(sample.education, /Communications/);
+  assert.equal(sample.roles[0].company, "Rivermark Health");
+  assert.equal(sample.roles[0].title, "Senior Brand Marketing Manager");
+  assert.equal(sample.roles[1].company, "Lume Collective");
+  assert.match(sample.education.join(" "), /Communications/);
   assert.match(sample.summary, /Brings cross-functional leadership/);
 });
 
 test("other sections such as certifications are kept, not dropped", () => {
   const d = doc(`${resumeText}\nCERTIFICATIONS\nHubSpot Inbound Certified`);
-  assert.match(d.earlier, /CERTIFICATIONS/);
-  assert.match(d.earlier, /HubSpot Inbound Certified/);
+  assert.match(d.education.join(" "), /HubSpot Inbound Certified/);
+});
+
+test("headings glued to line starts are detected", () => {
+  const d = doc(`Ava Chen\nDesigner\nava@example.com\nSummary Product designer with six years in SaaS.\nExperience\nDesigner, Northwind (2019 - Present)\nShipped the billing revamp.`);
+  assert.equal(d.summary, "Product designer with six years in SaaS.");
+  assert.equal(d.roles[0].title, "Designer");
+  assert.equal(d.roles[0].company, "Northwind");
+});
+
+test("a wrapped LinkedIn-style line still splits roles on date ranges", () => {
+  const d = doc(`Sam Park\nFounder\nsam@example.com\nFounder, NoLimit Labs (2022 -\nPresent) Shipped three apps.\nDesigner, Studio K (2019 - 2021)\nRan the rebrand.`);
+  assert.equal(d.roles.length, 2);
+  assert.equal(d.roles[0].dates, "2022 - Present");
+  assert.match(d.roles[0].bullets.join(" "), /Shipped three apps/);
 });
 
 import { proposeResumeUpdate } from "../src/lib/analyze.js";
@@ -56,4 +74,100 @@ test("a contraction at the start of an answer does not leak first person into th
   const line = proposeResumeUpdate({}, { id: "x" }, "I've directly managed 4 marketers at Brightwave, and I've coached two of them. More text.");
   assert.match(line, /^Directly managed 4 marketers/);
   assert.doesNotMatch(line, /^I/);
+});
+
+test("a wrapped bullet that continues with a capital rejoins into one bullet", () => {
+  // Narrow-column PDFs wrap mid-sentence; the continuation often starts with
+  // a capital (a proper noun like "Supabase"). It must not split the bullet.
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Experience Founder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products end to end using Claude Code, Codex,
+Supabase, Vercel, GitHub, Resend, and other AI-assisted tools.
+Shipped three apps.`);
+  assert.deepEqual(d.roles[0].bullets, [
+    "Design, direct, and ship products end to end using Claude Code, Codex, Supabase, Vercel, GitHub, Resend, and other AI-assisted tools.",
+    "Shipped three apps.",
+  ]);
+});
+
+test("no bullet ends with a comma or a dangling word, and no stranded qualifier starts one", () => {
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Experience Founder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products.
+1st Assistant Director, Freelance (2017 - Present, selective)
+Ran logistics for commercial shoots.
+Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and
+landscapes.`);
+  assert.doesNotMatch(JSON.stringify(d.roles), /selective\)/);
+  for (const role of d.roles) {
+    for (const bullet of role.bullets) {
+      assert.doesNotMatch(bullet, /[,;]$/, `bullet ends with a comma: ${bullet}`);
+      assert.doesNotMatch(bullet, /\b(and|or|with|of|for|the|a|an|&)$/i, `bullet ends dangling: ${bullet}`);
+      assert.doesNotMatch(bullet, /^[a-z][\w'&.-]*\)\s/, `bullet starts with a stranded qualifier: ${bullet}`);
+    }
+  }
+  const photo = d.roles.find((r) => r.title === "Photographer");
+  assert.ok(photo.bullets.some((b) => /Photographed actors, weddings, film sets, and landscapes\./.test(b)));
+});
+
+test("a wrapped bullet with a date range inside it does not spawn a phantom role", () => {
+  const d = doc(`Danny Jones
+Photographer
+danny@example.com
+Experience Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and
+landscapes Mount Rushmore portrait photography business (2006 - 2009)`);
+  assert.equal(d.roles.length, 1);
+  assert.equal(d.roles[0].title, "Photographer");
+  assert.ok(d.roles[0].bullets.some((b) => /Photographed actors, weddings, film sets, and landscapes Mount Rushmore/.test(b)));
+});
+
+test("a second document concatenated after the first is dropped", () => {
+  // A LinkedIn PDF with an old export appended: the real resume ends with
+  // "Contact details", then a second copy of the resume follows. The second
+  // copy must not leak into interests, roles, or anywhere else.
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Summary Product builder.
+Experience Founder, NoLimit Labs (2022 - Present)
+Shipped three apps.
+Education & Training State University (2010-2014). BS in computer science.
+Skills Product: roadmapping.
+Interests Hiking, cooking.
+Contact details
+Supervised 2nd ADs and PAs. Photographer, Danny Jones Photography (2000 - Present) Photographed actors. Education & Training Black Hills State University (1992-1993). Skills Product: testing. Interests Filmmaker. Assistant Software Engineer. Brings leadership.`);
+  assert.equal(d.interests, "Hiking, cooking.");
+  assert.equal(d.roles.length, 1);
+  assert.doesNotMatch(JSON.stringify(d), /Filmmaker|Assistant Software Engineer|Supervised 2nd ADs/);
+});
+
+test("repeated per-page headers never become bullets", () => {
+  // LinkedIn stamps "Danny Jones Resume" + "Page X of Y" on every page.
+  // When the footer splits across extraction lines, the name half survives
+  // the footer strip — it must not parse as a bullet, nor may a name
+  // fragment stranded after a date range ("(2009 - 2017) Danny").
+  const d = doc(`Danny Jones
+Founder & AI Product Builder | 1st Assistant Director
+Los Angeles, CA | dannyjones.ai | nolimitjones@gmail.com | 605-484-3913
+Summary Product builder with 4 years of shipping apps.
+Experience Founder & AI Product Builder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products end to end.
+Key 2nd Assistant Director, Freelance (2009 - 2017) Danny
+Danny Jones Resume
+Supervised 2nd ADs and PAs.
+Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and landscapes. Teamed with Danny Jones on the launch.`);
+  const flat = JSON.stringify(d.roles);
+  assert.doesNotMatch(flat, /"Danny"/);
+  assert.doesNotMatch(flat, /Danny Jones Resume/);
+  const second = d.roles.find((r) => r.title === "Key 2nd Assistant Director");
+  assert.deepEqual(second.bullets, ["Supervised 2nd ADs and PAs."]);
+  const photo = d.roles.find((r) => r.title === "Photographer");
+  assert.ok(photo.bullets.some((b) => /Teamed with Danny Jones on the launch/.test(b)), "a bullet that merely mentions the name survives");
 });

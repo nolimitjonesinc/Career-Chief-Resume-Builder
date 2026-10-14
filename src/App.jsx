@@ -7,11 +7,11 @@ import {
   MagnifyingGlass, Paperclip, Plus, ShieldCheck, Sparkle, Target, UploadSimple, X,
 } from "@phosphor-icons/react";
 import { acceptedFiles, extractFile, extractUrl } from "./lib/ingest";
-import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource, proposeResumeUpdate, sampleSources, sourceLabels } from "./lib/analyze";
+import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource, proposeResumeUpdate, sampleSources, sourceLabels, textToRoles } from "./lib/analyze";
 import { DRAFT_VERSION, isNewerDraft, migrateDraft, storageKey } from "./lib/draft";
 import { buildLedger } from "./lib/evidence";
 import { compareJobs } from "./lib/compare";
-import { splitCurrent, tailorByRules } from "./lib/tailor";
+import { roleHeader, splitRole, tailorByRules } from "./lib/tailor";
 import { EvidenceLedger, LedgerButton } from "./components/Ledger";
 import { EvidenceColumns } from "./components/Coverage";
 import { ParseCheck } from "./components/ParseCheck";
@@ -25,6 +25,8 @@ import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
 import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
 import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
+import { applyPreviewEdit } from "./lib/resume-view";
+import { ResumePreview } from "./components/ResumePreview";
 import { blankJob, starterReady, starterResumeText } from "./lib/starter";
 
 const blankMeta = { company: "", role: "" };
@@ -324,15 +326,15 @@ export function App() {
 
   // Tailor to the job: a proposal the user reviews part by part (Rules 3 and 4).
   async function startTailor() {
-    const { header, bullets } = splitCurrent(doc.current);
+    const { header, bullets } = splitRole(doc.roles?.[0]);
     setModal("tailor");
     if (analysis?.researchMode === "ai" && aiConsent) {
       setTailorState({ status: "loading" });
       try {
-        const response = await fetch("/api/ai/tailor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, company: meta.company, summary: doc.summary, header, bullets, skills: doc.skills, answers: answers.map((item) => item.text), priorities: (analysis.requirements || []).map((item) => item.label || item.key) }) });
+        const response = await fetch("/api/ai/tailor", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, company: meta.company, summary: doc.summary, header, bullets, skills: (doc.skills || []).join(" · "), answers: answers.map((item) => item.text), priorities: (analysis.requirements || []).map((item) => item.label || item.key) }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Tailoring could not finish.");
-        setTailorState({ status: "ready", mode: "ai", result });
+        setTailorState({ status: "ready", mode: "ai", result: normalizeTailorResult(result, doc) });
       } catch (error) { setTailorState({ status: "error", message: error.message }); }
     } else {
       const jobBlob = [jobText, ...sources.filter((item) => item.kind === "job" || item.kind === "application").map((item) => item.text)].filter(Boolean).join("\n");
@@ -348,7 +350,7 @@ export function App() {
   function applyTailor(picks) {
     const result = tailorState.result;
     setHistory((items) => [...items, { ...doc }]);
-    setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { current: result.currentLines.join("\n") } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
+    setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { roles: result.roles } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
     setModal(null);
     setNotice("Tailoring applied. Undo is under the working resume if you change your mind.");
   }
@@ -360,17 +362,26 @@ export function App() {
     const line = proposal.trim();
     // A follow-up sharpens an answer already given, so its wording replaces the
     // earlier line for that topic instead of stacking a near duplicate beneath
-    // it. Replacing the exact text leaves any hand-edited lines untouched.
-    // Current-role answers (often a deck about the newest job) extend that
-    // section instead of the tailored achievement.
-    const section = question.section === "current" ? "current" : "tailored";
+    // it. Current-role answers (often a deck about the newest job) extend the
+    // newest role's bullets; other answers join the highlights list, which paid
+    // exports fold into the newest role's bullets.
+    const toCurrent = question.section === "current";
     const earlier = answers.find((item) => item.topic === question.topic);
-    setDoc((value) => ({
-      ...value,
-      [section]: earlier && value[section].includes(earlier.resumeLine)
-        ? value[section].replace(earlier.resumeLine, line)
-        : section === "current" || (value.tailored && answers.length) ? `${value[section]}\n${line}` : line,
-    }));
+    setDoc((value) => {
+      if (toCurrent) {
+        const roles = (value.roles || []).map((role) => ({ ...role, bullets: [...(role.bullets || [])] }));
+        if (!roles.length) roles.push({ title: "", company: "", dates: "", bullets: [] });
+        const bullets = roles[0].bullets;
+        const at = earlier ? bullets.indexOf(earlier.resumeLine) : -1;
+        if (at >= 0) bullets[at] = line; else if (line) bullets.push(line);
+        roles[0] = { ...roles[0], bullets };
+        return { ...value, roles };
+      }
+      const highlights = [...(value.highlights || [])];
+      const at = earlier ? highlights.indexOf(earlier.resumeLine) : -1;
+      if (at >= 0) highlights[at] = line; else if (line) highlights.push(line);
+      return { ...value, highlights };
+    });
     setAnswers((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), questionId: question.id, topic: question.topic, question: question.prompt, text: savedAnswer, resumeLine: line }]);
     setCareerBank((items) => [...items.filter((item) => item.topic !== question.topic), { id: uid(), topic: question.topic, question: question.prompt, text: savedAnswer, origin: `${meta.company || "Opportunity"} interview` }]);
     setQuestionStatus((state) => ({ ...state, [question.id]: "answered" }));
@@ -399,6 +410,13 @@ export function App() {
     setDoc(history.at(-1));
     setHistory((items) => items.slice(0, -1));
     setNotice("The previous resume wording was restored. Your evidence stays in the career record.");
+  }
+
+  function saveInlineEdit(edit) {
+    setHistory((items) => [...items, { ...doc }]);
+    setDoc((value) => applyPreviewEdit(value, edit));
+    setManualEdit(true);
+    setNotice("Your edit is saved. Future suggestions still require your approval.");
   }
 
   function saveEditor(value) {
@@ -555,7 +573,7 @@ export function App() {
         </main>
         <aside className="resume-pane">
           <div className="resume-top"><div><span>Working resume</span><small>Available from the start</small></div><button className="text-action" onClick={() => setModal("editor")}><ArrowSquareOut size={17} /> Open & edit</button></div>
-          <Resume doc={doc} answered={answers.length} />
+          <ResumePreview doc={doc} onEdit={saveInlineEdit} />
           {ledger && <div className="resume-ledger"><LedgerButton ledger={ledger} open={() => setModal("ledger")} /></div>}
           <div className="resume-foot"><span>{manualEdit ? "Your manual wording is protected." : "All proposed changes require approval."}</span><button className="text-action" disabled={!history.length} onClick={undoResume}><ArrowCounterClockwise size={16} /> Undo</button></div>
         </aside>
@@ -698,21 +716,58 @@ function CareerEvidence({ sources, answers, inspect, add, clear }) {
   return <><span className="eyebrow">Your reusable career record</span><h1>Remember it once.<br/>Use it thoughtfully.</h1><p className="lead">Career evidence can support more than one application. Each company still gets its own strategy and resume draft.</p><div className="section-title"><div><h3>Career sources</h3><p>Documents and context you supplied.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add context</button></div>{career.map((source) => <button className="evidence-card" key={source.id} onClick={() => inspect(source)}><span className="badge">{sourceLabels[source.kind]} · supplied</span><strong>{source.name}</strong><p>{source.text.slice(0, 180)}{source.text.length > 180 ? "…" : ""}</p></button>)}<div className="section-title answer-title"><div><h3>Evidence gathered in the interview</h3><p>These answers are user-supplied, not independently verified.</p></div><span className="count-pill">{answers.length}</span></div>{answers.length ? answers.map((item) => <article className="answer-evidence" key={item.id}><span className="badge">{item.topic}</span><p>{item.text}</p><small>Resume wording: {item.resumeLine}</small></article>) : <div className="empty-card">Useful answers will collect here as you work through the question plan.</div>}<button className="text-action" onClick={clear}>Clear saved draft from this device</button></>;
 }
 
-function Resume({ doc, answered }) {
-  return <article className="resume"><h2>{doc.name}</h2><div className="resume-title">{doc.title}</div><p className="contact">{doc.contact}</p><p>{doc.summary}</p><h4>Experience</h4><p className="prewrap">{doc.current}</p><p className={answered ? "tailored updated" : "tailored"}>{doc.tailored}{answered > 0 && <span className="resume-tag">Updated from your answers</span>}</p><h4>Earlier experience</h4><p className="prewrap">{doc.earlier}</p><h4>Education</h4><p>{doc.education}</p><h4>Capabilities</h4><p>{doc.skills}</p><p className="demo-doc">WORKING DRAFT · REVIEW BEFORE USE</p></article>;
-}
-
 function SourceForm({ draft, setDraft, prepareFile, save, busy }) {
   return <><h2>Add context from anywhere.</h2><p>Paste rough notes, upload a presentation or document, or bring in a public webpage. Tell me what it should help with and I’ll dig through it with that in mind.</p><div className="two-fields"><label>What is it?<select value={draft.kind} onChange={(event) => setDraft({ ...draft, kind: event.target.value })}>{Object.entries(sourceLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>What should it help with?<select value={draft.focus} onChange={(event) => setDraft({ ...draft, focus: event.target.value })}>{Object.entries(focusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div><div className="mode-tabs">{[['text','Paste text'],['file','Upload file'],['link','Public link']].map(([value,label]) => <button key={value} className={draft.mode === value ? "active" : ""} onClick={() => setDraft({ ...draft, mode: value })}>{label}</button>)}</div><label>Source name <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Optional label" /></label>{draft.mode === "text" && <label>Notes or evidence<textarea value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} placeholder="Paste anything useful. You do not have to organize it." /></label>}{draft.mode === "file" && <label className="drop-upload"><UploadSimple size={25} /><strong>Choose PowerPoint, PDF, Word, HTML, TXT, Markdown, or RTF</strong><span>{draft.parsedFile ? `${draft.parsedFile.name} is ready · ${draft.parsedFile.origin}` : "Slides, speaker notes, tables and chart numbers are all read, right here in your browser."}</span><input type="file" accept={acceptedFiles} onChange={(event) => prepareFile(event.target.files[0])} /></label>}{draft.mode === "link" && <label>Public HTTPS link<input type="url" value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label>}<p className="quiet">Only share information you are permitted to use. A source is evidence—not automatic proof that every statement is true.</p><button className="primary" disabled={busy} onClick={save}>Add and analyze this source <ArrowRight size={18} /></button></>;
 }
 
 function SourceView({ source }) { return <><span className="badge">{sourceLabels[source.kind]} · {source.origin}</span><h2>{source.name}</h2>{source.url && <a className="source-url" href={source.url} target="_blank" rel="noreferrer">{source.url} <ArrowSquareOut size={15} /></a>}<h3>Extracted text</h3><div className="extracted-text">{source.text}</div><p className="quiet">This is the text used by the prototype analyzer. Production should retain source URL, retrieval date, excerpt, and verification status.</p></>; }
 
-function Proposal({ doc, question, answer, proposal, setProposal, apply, manual, requirements, supports, canRevise, revise }) { return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">CURRENT ROLE SECTION · THIS WORDING IS ADDED TO IT</span><p className="prewrap quiet">{doc.current}</p></> : <><span className="eyebrow">CURRENT RESUME LINE</span><p className="old-copy">{doc.tailored}</p></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
+function Proposal({ doc, question, answer, proposal, setProposal, apply, manual, requirements, supports, canRevise, revise }) { return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">NEWEST ROLE · THIS WORDING IS ADDED TO ITS BULLETS</span><ul className="prewrap quiet">{((doc.roles || [])[0]?.bullets || []).map((bullet, index) => <li key={index}>{bullet}</li>)}</ul></> : <><span className="eyebrow">NEW LINES FROM YOUR ANSWERS</span><ul className="old-copy">{(doc.highlights || []).map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
 
-function ResumeEditor({ doc, save }) { const [value, setValue] = useState({ ...doc }); const fields = { name: "Name", title: "Professional title", contact: "Contact details", summary: "Professional summary", current: "Current experience", tailored: "Tailored achievement", earlier: "Earlier experience", education: "Education", skills: "Capabilities" }; return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>{Object.entries(fields).map(([key,label]) => <label key={key}>{label}{["summary","current","tailored","earlier","skills"].includes(key) ? <textarea value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} /> : <input value={value[key]} onChange={(event) => setValue({ ...value, [key]: event.target.value })} />}</label>)}<button className="primary" onClick={() => save(value)}>Save my wording <Check size={18} /></button></>; }
+function ResumeEditor({ doc, save }) {
+  const [name, setName] = useState(doc.name || "");
+  const [title, setTitle] = useState(doc.title || "");
+  const [contact, setContact] = useState(doc.contact || "");
+  const [summary, setSummary] = useState(doc.summary || "");
+  const [expText, setExpText] = useState(() => (doc.roles || []).map((role) =>
+    [[role.title, role.company].filter(Boolean).join(", "), role.dates].filter(Boolean).join(" — ")
+    + "\n" + (role.bullets || []).join("\n")).join("\n\n"));
+  const [highlightsText, setHighlightsText] = useState(() => (doc.highlights || []).join("\n"));
+  const [educationText, setEducationText] = useState(() => (doc.education || []).join("\n"));
+  const [skillsText, setSkillsText] = useState(() => (doc.skills || []).join(", "));
+  const [interests, setInterests] = useState(doc.interests || "");
+  const saveAll = () => save({
+    name: name.trim(), title: title.trim(), contact: contact.trim(), summary: summary.trim(),
+    roles: textToRoles(expText),
+    highlights: highlightsText.split("\n").map((line) => line.trim()).filter(Boolean),
+    education: educationText.split("\n").map((line) => line.trim()).filter(Boolean),
+    skills: skillsText.split(/[,·\n]+/).map((line) => line.trim()).filter(Boolean),
+    interests: interests.trim(),
+  });
+  return <><h2>Your words. Your resume.</h2><p>Edit every section directly. Suggested changes still require your approval.</p>
+    <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+    <label>Professional title<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
+    <label>Contact details<input value={contact} onChange={(event) => setContact(event.target.value)} /></label>
+    <label>Professional summary<textarea value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+    <label>Experience — one block per role: a header line with the date range, then one bullet per line<textarea value={expText} onChange={(event) => setExpText(event.target.value)} rows={10} /></label>
+    <label>New lines from your answers — one per line<textarea value={highlightsText} onChange={(event) => setHighlightsText(event.target.value)} /></label>
+    <label>Education — one per line<textarea value={educationText} onChange={(event) => setEducationText(event.target.value)} /></label>
+    <label>Capabilities — separated by commas<input value={skillsText} onChange={(event) => setSkillsText(event.target.value)} /></label>
+    <label>Interests<textarea value={interests} onChange={(event) => setInterests(event.target.value)} /></label>
+    <button className="primary" onClick={saveAll}>Save my wording <Check size={18} /></button></>;
+}
 
 function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, tailor, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} /><div className="tailor-offer"><button className="secondary wide" onClick={tailor}>Tailor this resume to the job</button><small>{analysis?.researchMode === "ai" ? "Reorders and lightly rewords what you already wrote so the most relevant lines come first. You approve each part." : "Moves the lines this job talks about to the top. Nothing is added or reworded. You approve it first."}</small></div>{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
+
+// The AI tailor endpoint still speaks the old flat shape (header + bullet
+// lines for the newest role); normalize it to the structured roles model so
+// the review UI and apply step only ever handle one shape.
+function normalizeTailorResult(result, doc) {
+  if (!result || result.roles) return result;
+  const [, ...bullets] = result.currentLines || [];
+  const roles = (doc.roles || []).map((role, index) => index === 0 ? { ...role, bullets } : role);
+  return { ...result, roles };
+}
 
 function Tailor({ doc, state, apply, back, simple }) {
   const [picks, setPicks] = useState({ summary: true, experience: true, skills: true });
@@ -720,10 +775,12 @@ function Tailor({ doc, state, apply, back, simple }) {
   if (state.status === "error") return <><h2>Nothing was changed.</h2><p>{state.message}</p><p className="quiet">The AI is held to your own facts, so it sometimes gets turned away. You can still move the lines this job talks about to the top, with no rewording.</p><button className="primary" onClick={simple}>Use the simple reorder</button> <button className="secondary" onClick={back}>Back</button></>;
   if (state.status !== "ready") return null;
   const { result } = state;
+  const roleLines = (roles) => (roles || []).map((role) => [roleHeader(role), ...(role.bullets || [])].join("\n")).join("\n");
+  const skillsText = (skills) => (skills || []).join(" · ");
   const rows = [
     result.summary && result.summary !== doc.summary ? { key: "summary", title: "Summary", before: doc.summary, after: result.summary } : null,
-    result.currentLines.join("\n") !== doc.current ? { key: "experience", title: "Current role, lines in a new order", before: doc.current, after: result.currentLines.join("\n") } : null,
-    result.skills && result.skills !== doc.skills ? { key: "skills", title: "Skills order", before: doc.skills, after: result.skills } : null,
+    roleLines(result.roles) !== roleLines(doc.roles) ? { key: "experience", title: "Experience, lines in a new order", before: roleLines(doc.roles), after: roleLines(result.roles) } : null,
+    result.skills && skillsText(result.skills) !== skillsText(doc.skills) ? { key: "skills", title: "Skills order", before: skillsText(doc.skills), after: skillsText(result.skills) } : null,
   ].filter(Boolean);
   if (!rows.length) return <><h2>Already lined up.</h2><p>Your resume already leads with what this job asks for, so there is nothing to reorder.</p><button className="secondary" onClick={back}>Back</button></>;
   return <><h2>Review the tailoring.</h2><p>{state.mode === "ai" ? "Your own facts and figures only. Tick what you want; nothing changes until you approve." : "Same lines, new order. Tick what you want; nothing changes until you approve."}</p>
