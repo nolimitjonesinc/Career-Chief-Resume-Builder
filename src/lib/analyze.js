@@ -172,6 +172,9 @@ const headingAlone = (line) => {
   if (label.length > 48) return null;
   return SECTION_HEADINGS.find(([, pattern]) => pattern.test(label))?.[0] || null;
 };
+// Normalize a heading label for repeat detection ("Education & Training" and
+// "education & training" are the same heading; "Education" is not).
+const normLabel = (s) => String(s).toLowerCase().replace(/[:\s]+$/, "").replace(/\s+/g, " ").trim();
 // A heading glued to the start of a content line: "Summary Product builder…".
 // The remainder must start uppercase (or be empty / after a colon), so a bullet
 // like "Experience with Python" is not mistaken for a heading.
@@ -179,7 +182,7 @@ const headingPrefix = (line) => {
   const colon = line.match(/^([A-Za-z&() ]+?)\s*:\s*(.*)$/);
   if (colon) {
     const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(colon[1].trim()))?.[0];
-    if (key) return { key, rest: colon[2].trim() };
+    if (key) return { key, rest: colon[2].trim(), label: normLabel(colon[1]) };
   }
   const words = line.split(/\s+/);
   for (let n = Math.min(4, words.length - 1); n >= 1; n--) {
@@ -189,7 +192,7 @@ const headingPrefix = (line) => {
     if (!key) continue;
     const rest = words.slice(n).join(" ").trim();
     if (rest && !/^[A-Z0-9(]/.test(rest)) continue;
-    return { key, rest };
+    return { key, rest, label: normLabel(label) };
   }
   return null;
 };
@@ -217,49 +220,109 @@ const splitLineOnHeading = (line) => {
       if (!key) continue;
       const start = matchIsHeading ? m.index : m.index + m[0].length;
       if (cuts.some((cut) => Math.abs(cut.start - start) < word.length + 1)) continue;
-      cuts.push({ start, end: start + word.length, key });
+      cuts.push({ start, end: start + word.length, key, label: normLabel(word) });
     }
   };
   cutAt(MID_HEADING_RE, false);
   cutAt(LOOSE_MID_HEADING_RE, true);
   cutAt(LOOSE_SINGLE_HEADING_RE, true);
   cuts.sort((a, b) => a.start - b.start);
-  if (!cuts.length) return [{ heading: null, text: line }];
+  if (!cuts.length) return [{ heading: null, label: null, text: line }];
   const segments = [];
   let cursor = 0;
   let currentKey = null;
+  let currentLabel = null;
   for (const cut of cuts) {
     const before = line.slice(cursor, cut.start).trim();
-    if (before) segments.push({ heading: currentKey, text: before });
+    if (before) segments.push({ heading: currentKey, label: currentLabel, text: before });
     currentKey = cut.key;
+    currentLabel = cut.label;
     cursor = cut.end;
   }
   const tail = line.slice(cursor).trim();
-  if (tail) segments.push({ heading: currentKey, text: tail });
+  if (tail) segments.push({ heading: currentKey, label: currentLabel, text: tail });
   return segments.filter((segment) => segment.text);
 };
 
+// The text before a date range reads like a role header (title + company):
+// it names a title word and either has a comma or is short.
+function beforeDateLooksLikeRoleHead(before) {
+  const text = String(before || "").trim();
+  if (!text) return false;
+  if (!TITLE_WORD_RE.test(text)) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  return /,/.test(text) || words.length <= 8;
+}
+// A line starts a new role when its date range is preceded by a title-like
+// phrase ("Director, Freelance (2017 – Present)", "Photographer (2000 –
+// Present)"). A bare date range ("2021 – Present) Shipped…") is the tail of
+// a wrapped date, not a new role.
+function lineStartsRole(line) {
+  if (!/^[A-Z0-9(]/.test(line)) return false;
+  const m = line.match(DATE_RANGE);
+  if (!m) return false;
+  return beforeDateLooksLikeRoleHead(line.slice(0, m.index));
+}
+// A role title wrapped across lines ("…producer Photographer, Danny Jones" /
+// "Photography (2000 – Present)…"): the tail of the previous line plus the
+// text before this line's date range reads like a role header. The line must
+// NOT join, or the title fragment is swallowed into the previous bullet and
+// the role vanishes.
+function lineCompletesRoleTitle(prev, line) {
+  const m = line.match(DATE_RANGE);
+  if (!m) return false;
+  const prevTail = String(prev || "").split(/\s+/).slice(-4).join(" ");
+  return beforeDateLooksLikeRoleHead(`${prevTail} ${line.slice(0, m.index)}`);
+}
+
 // Rejoin lines that a narrow-column PDF wrapped mid-sentence. A fragment joins
-// the previous line when the previous line does not end with sentence
-// punctuation, the fragment is not a heading or a new role, and either the
-// fragment starts lowercase (a true continuation) or the previous line ends
-// mid-construct like "(2022 –" or "(". Bullet glyphs and headings always break.
+// the previous line when the previous line does not end with terminal
+// punctuation (. ! ?), whatever case the fragment starts with — wrapped lines
+// often start with a capital (a proper noun like "Supabase", a product name
+// like "Loomiverse.ai"). The join stops at a heading, a role header, a
+// date-range start, a contact line, a prompt, a page-header fragment, or the
+// name line itself.
 function rejoinWrapped(lines) {
+  const { name } = splitNameLine(lines[0] || "");
   const out = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || JUNK_LINE.test(line)) continue;
     const prev = out.at(-1);
-    const prevIsHeading = prev && (headingAlone(prev) || headingPrefix(prev));
+    // The name line is split by parseHeader; gluing the headline onto it
+    // corrupts the name ("Danny Jones Founder & … | 1st Assistant…" splits
+    // at the pipe, not at the title words).
+    const prevIsNameLine = out.length === 1;
+    // Only a PURE heading line blocks a join. A heading-prefix line
+    // ("Experience Photographer, … (2000 – Present)") carries content after
+    // the heading — the next line continues that content, and blocking the
+    // join would leave a bullet line whose date range spawns a phantom role.
+    const prevIsHeading = prev && headingAlone(prev);
     const lineIsHeading = headingAlone(line) || headingPrefix(line);
-    const lineIsRole = DATE_RANGE.test(line);
-    // A new contact line (email/phone first) or a line ending in a structural
-    // pipe is a fresh block, not a wrapped sentence fragment.
+    // A new contact line (email/phone first) or a line starting with a
+    // structural pipe is a fresh block, not a wrapped sentence fragment.
     const lineIsContact = /^[^\s@|·,;]+@[^\s@|·,;]+\.[^\s@|·,;]+/.test(line) || /^(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/.test(line);
-    const continues = prev && !prevIsHeading && !lineIsHeading && !lineIsRole && !lineIsContact
+    const lineIsSeparator = /^[|·•]/.test(line);
+    // A prompt line ("Contact details", "Add your most recent role…") is a
+    // standalone block: never glued onto the previous line, and nothing
+    // glues onto it — it marks a boundary, not a sentence continuation.
+    const lineIsPrompt = isPrompt(line);
+    const prevIsPrompt = prev && isPrompt(prev);
+    // A per-page header fragment ("Danny Jones Resume") is layout, not
+    // content: never glued onto a content line, and nothing glues onto it.
+    const lineIsPageHeader = name && isPageHeaderJunk(line, name);
+    const prevIsPageHeader = prev && name && isPageHeaderJunk(prev, name);
+    // A line starting with a date range starts a new role — unless the
+    // previous line ends mid-date ("(2022 –"), when the range is the tail of
+    // a wrapped date, not a new role.
+    const dateAtStart = line.match(DATE_RANGE);
+    const lineStartsWithDateRange = dateAtStart && dateAtStart.index <= 1 && !/[-–—(]$/.test(prev || "");
+    const lineIsRole = lineStartsRole(line) || lineCompletesRoleTitle(prev, line) || lineStartsWithDateRange;
+    const continues = prev && !prevIsNameLine && !prevIsHeading && !lineIsHeading && !lineIsRole
+      && !lineIsContact && !lineIsSeparator && !lineIsPrompt && !prevIsPrompt
+      && !lineIsPageHeader && !prevIsPageHeader
       && !BULLET_GLYPH.test(line)
-      && !/[.!?:;|]$/.test(prev)
-      && (/^[a-z]/.test(line) || /[-–—(]$/.test(prev));
+      && !/[.!?]$/.test(prev);
     if (continues) out[out.length - 1] = `${prev} ${line}`;
     else out.push(line);
   }
@@ -375,10 +438,55 @@ function parseRoleHead(before) {
   return { title: title.trim(), company: company.trim() };
 }
 
-const toBullets = (lines) => lines
-  .flatMap((line) => String(line).split(/(?<=[.!?])\s+(?=[A-Z0-9(])/))
-  .map((line) => line.replace(BULLET_GLYPH, "").trim())
-  .filter((line) => line && !JUNK_LINE.test(line) && line.length > 1);
+const toBullets = (lines, name = "") => {
+  let bullets = lines
+    .flatMap((line) => String(line).split(/(?<=[.!?])\s+(?=[A-Z0-9(])/))
+    .map((line) => line.replace(BULLET_GLYPH, "").trim())
+    .filter((line) => line && !JUNK_LINE.test(line) && line.length > 1);
+  // A bullet that IS a page-header fragment ("Danny Jones Resume") is layout,
+  // not content.
+  if (name) bullets = bullets.filter((bullet) => !isPageHeaderJunk(bullet, name));
+  // A page-header shard glued to a sentence start ("Danny Supervised…") is
+  // layout: strip it, keeping the sentence.
+  if (name) {
+    bullets = bullets.map((bullet) => {
+      let text = bullet;
+      for (let guard = 0; guard < 3; guard++) {
+        const words = text.split(/\s+/);
+        let stripped = null;
+        for (let n = Math.min(3, words.length - 1); n >= 1; n--) {
+          if (isPageHeaderJunk(words.slice(0, n).join(" "), name) && /^[A-Z0-9]/.test(words[n])) { stripped = words.slice(n).join(" "); break; }
+        }
+        if (!stripped) break;
+        text = stripped;
+      }
+      return text;
+    }).filter((bullet) => bullet && !isPageHeaderJunk(bullet, name));
+  }
+  // A stranded qualifier ("selective)") at a bullet start is the tail of a
+  // parenthetical date range, not a sentence.
+  bullets = bullets.map((bullet) => bullet.replace(/^[a-z][\w'&.-]*\)\s*/, "").trim()).filter(Boolean);
+  // Merge a bullet that ends mid-phrase into the next one, so no bullet ends
+  // with a comma or a dangling word ("…film sets, and" + "landscapes…" →
+  // "…film sets, and landscapes…").
+  const merged = [];
+  for (const bullet of bullets) {
+    const prev = merged.at(-1);
+    if (prev !== undefined && DANGLING_END.test(prev)) merged[merged.length - 1] = `${prev} ${bullet}`.trim();
+    else merged.push(bullet);
+  }
+  // A dangling tail with no next bullet to absorb it is cut, not kept:
+  // "…film sets, and" → "…film sets".
+  return merged.map((bullet) => {
+    let text = bullet;
+    while (DANGLING_END.test(text)) text = text.replace(DANGLING_END, "").trim();
+    return text;
+  }).filter(Boolean);
+};
+// A bullet ending that means the sentence kept going: a comma/semicolon, a
+// trailing dash, or a dangling conjunction/article/preposition. ("to", "in",
+// "on", "at" are left out — "Logged in", "Switched on" are complete.)
+const DANGLING_END = /(?:[,;:–—-]| (?:and|or|with|of|for|the|a|an|&))$/i;
 
 const normLine = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const dedupeLines = (lines) => {
@@ -404,6 +512,11 @@ function splitRoles(lines, name = "") {
       let before = [...pending, line.slice(0, match.index).trim()].join(" ").trim().replace(/[,;:([\-–—\s]+$/, "");
       pending = [];
       const after = line.slice(match.index + match[0].length).trim().replace(/^[,;:\-–—\s)]+/, "");
+      // A parenthetical qualifier stranded after a date range ("(2017 –
+      // Present, selective) DGA member…", "(2015 – 2018, selective)") is
+      // part of the date, not a bullet.
+      const dateInParens = (line.slice(0, match.index).match(/\(/g) || []).length > (line.slice(0, match.index).match(/\)/g) || []).length;
+      const afterClean = dateInParens ? after.replace(/^[a-z][\w'&.-]*\)\s*/, "") : after;
       // Recover a title fragment stranded at the end of the previous bullet.
       const prev = roles.at(-1);
       if (prev?.bullets.length && before.split(",")[0].trim().split(/\s+/).filter(Boolean).length <= 2) {
@@ -420,7 +533,7 @@ function splitRoles(lines, name = "") {
       if (title.split(/\s+/).filter(Boolean).length > 3) title = title.replace(/^(?:[a-z][\w&'-]*\s+)+/, "").trim();
       // A page-header fragment stranded after a date range ("(2009 – 2017)
       // Danny") is layout, not a bullet.
-      const afterBullet = after && !isPageHeaderJunk(after, name) ? [after] : [];
+      const afterBullet = afterClean && !isPageHeaderJunk(afterClean, name) ? [afterClean] : [];
       roles.push({ title, company, dates: match[0].trim(), bullets: afterBullet });
     } else if (roles.length) {
       roles.at(-1).bullets.push(line);
@@ -441,7 +554,7 @@ function splitRoles(lines, name = "") {
     }
     out.push(role);
   }
-  return out.map((role) => ({ ...role, bullets: dedupeLines(toBullets(role.bullets)) }));
+  return out.map((role) => ({ ...role, bullets: dedupeLines(toBullets(role.bullets, name)) }));
 }
 
 const EDUCATION_HINT = /(\b(B\.?A\.?|B\.?S\.?|M\.?B\.?A\.?|M\.?A\.?|M\.?S\.?|Ph\.?D\.?|J\.?D\.?)\b|university|college|school of|institute of|certificat)/i;
@@ -461,6 +574,17 @@ export function parseResumeText(resumeText) {
   const content = rest.filter((line) => !isPageHeaderJunk(line, name));
   const sections = { summary: [], experience: [], education: [], skills: [], interests: [], other: [], drop: [] };
   let at = null;
+  // A second document concatenated onto the first (a LinkedIn PDF with an
+  // old export appended) repeats its section headings. The first repeat of a
+  // heading that already has content means the first document ended: drop
+  // the whole line and stop — the leading text is second-document content
+  // too, and everything after it belongs to the second document. Scaffolding
+  // headings ("drop") never truncate; a heading repeating with an empty
+  // section does not truncate either.
+  const seenLabels = new Set();
+  let stopped = false;
+  const isRepeatHeading = (key, label) => key && key !== "drop" && label && seenLabels.has(label) && sections[key]?.length > 0;
+  const noteHeading = (key, label) => { if (key && label) seenLabels.add(label); };
   const feedText = (heading, text) => {
     if (heading) at = heading;
     if (text && at) sections[at].push(text);
@@ -468,14 +592,30 @@ export function parseResumeText(resumeText) {
     // "drop" sections (app scaffolding) are collected and ignored.
   };
   const feedLine = (line) => {
+    if (stopped) return;
+    // "Contact details" after a full resume has already been fed is the
+    // LinkedIn end-of-resume marker: everything after it is a concatenated
+    // second copy (then an AI summary, then template scaffolding). Stop.
+    // A "Contact details" line before any content is just a prompt, and is
+    // filtered out below like any other prompt.
+    if (normLabel(line) === "contact details"
+      && (sections.summary.length || sections.experience.length || sections.education.length || sections.skills.length || sections.interests.length)) { stopped = true; return; }
     const alone = headingAlone(line);
-    if (alone) { at = alone; return; }
+    if (alone) {
+      const label = normLabel(line);
+      if (isRepeatHeading(alone, label)) { stopped = true; return; }
+      noteHeading(alone, label);
+      at = alone; return;
+    }
     // A heading stranded at the end of a line ("…storytelling Interests"):
     // the head stays in the current section, the next line starts the new one.
     const trailing = line.match(/\s((?:Education(?: & Training)?|Professional Experience|Work Experience|Technical Skills|Core Skills|Summary|Experience|Employment|Skills|Interests|Projects|Certifications))\s*$/);
     if (trailing) {
       const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(trailing[1]))?.[0];
       if (key) {
+        const label = normLabel(trailing[1]);
+        if (isRepeatHeading(key, label)) { stopped = true; return; }
+        noteHeading(key, label);
         const head = line.slice(0, trailing.index).trim();
         if (head) feedText(null, head);
         at = key;
@@ -484,12 +624,18 @@ export function parseResumeText(resumeText) {
     }
     const prefixed = headingPrefix(line);
     if (prefixed) {
-      // The remainder can itself contain further glued headings.
+      // The remainder can itself contain further glued headings: check every
+      // heading in the line for a repeat BEFORE feeding any of it.
+      const segments = splitLineOnHeading(prefixed.rest);
+      if (isRepeatHeading(prefixed.key, prefixed.label) || segments.some((segment) => isRepeatHeading(segment.heading, segment.label))) { stopped = true; return; }
+      noteHeading(prefixed.key, prefixed.label);
       feedText(prefixed.key, null);
-      for (const segment of splitLineOnHeading(prefixed.rest)) feedText(segment.heading, segment.text);
+      for (const segment of segments) { noteHeading(segment.heading, segment.label); feedText(segment.heading, segment.text); }
       return;
     }
-    for (const segment of splitLineOnHeading(line)) feedText(segment.heading, segment.text);
+    const segments = splitLineOnHeading(line);
+    if (segments.some((segment) => isRepeatHeading(segment.heading, segment.label))) { stopped = true; return; }
+    for (const segment of segments) { noteHeading(segment.heading, segment.label); feedText(segment.heading, segment.text); }
   };
   for (const line of content) feedLine(line);
   for (const key of Object.keys(sections)) sections[key] = sections[key].filter((line) => !isPrompt(line));

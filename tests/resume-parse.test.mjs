@@ -76,6 +76,77 @@ test("a contraction at the start of an answer does not leak first person into th
   assert.doesNotMatch(line, /^I/);
 });
 
+test("a wrapped bullet that continues with a capital rejoins into one bullet", () => {
+  // Narrow-column PDFs wrap mid-sentence; the continuation often starts with
+  // a capital (a proper noun like "Supabase"). It must not split the bullet.
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Experience Founder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products end to end using Claude Code, Codex,
+Supabase, Vercel, GitHub, Resend, and other AI-assisted tools.
+Shipped three apps.`);
+  assert.deepEqual(d.roles[0].bullets, [
+    "Design, direct, and ship products end to end using Claude Code, Codex, Supabase, Vercel, GitHub, Resend, and other AI-assisted tools.",
+    "Shipped three apps.",
+  ]);
+});
+
+test("no bullet ends with a comma or a dangling word, and no stranded qualifier starts one", () => {
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Experience Founder, NoLimit Labs (2022 - Present)
+Design, direct, and ship products.
+1st Assistant Director, Freelance (2017 - Present, selective)
+Ran logistics for commercial shoots.
+Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and
+landscapes.`);
+  assert.doesNotMatch(JSON.stringify(d.roles), /selective\)/);
+  for (const role of d.roles) {
+    for (const bullet of role.bullets) {
+      assert.doesNotMatch(bullet, /[,;]$/, `bullet ends with a comma: ${bullet}`);
+      assert.doesNotMatch(bullet, /\b(and|or|with|of|for|the|a|an|&)$/i, `bullet ends dangling: ${bullet}`);
+      assert.doesNotMatch(bullet, /^[a-z][\w'&.-]*\)\s/, `bullet starts with a stranded qualifier: ${bullet}`);
+    }
+  }
+  const photo = d.roles.find((r) => r.title === "Photographer");
+  assert.ok(photo.bullets.some((b) => /Photographed actors, weddings, film sets, and landscapes\./.test(b)));
+});
+
+test("a wrapped bullet with a date range inside it does not spawn a phantom role", () => {
+  const d = doc(`Danny Jones
+Photographer
+danny@example.com
+Experience Photographer, Danny Jones Photography (2000 - Present)
+Photographed actors, weddings, film sets, and
+landscapes Mount Rushmore portrait photography business (2006 - 2009)`);
+  assert.equal(d.roles.length, 1);
+  assert.equal(d.roles[0].title, "Photographer");
+  assert.ok(d.roles[0].bullets.some((b) => /Photographed actors, weddings, film sets, and landscapes Mount Rushmore/.test(b)));
+});
+
+test("a second document concatenated after the first is dropped", () => {
+  // A LinkedIn PDF with an old export appended: the real resume ends with
+  // "Contact details", then a second copy of the resume follows. The second
+  // copy must not leak into interests, roles, or anywhere else.
+  const d = doc(`Danny Jones
+Founder
+danny@example.com
+Summary Product builder.
+Experience Founder, NoLimit Labs (2022 - Present)
+Shipped three apps.
+Education & Training State University (2010-2014). BS in computer science.
+Skills Product: roadmapping.
+Interests Hiking, cooking.
+Contact details
+Supervised 2nd ADs and PAs. Photographer, Danny Jones Photography (2000 - Present) Photographed actors. Education & Training Black Hills State University (1992-1993). Skills Product: testing. Interests Filmmaker. Assistant Software Engineer. Brings leadership.`);
+  assert.equal(d.interests, "Hiking, cooking.");
+  assert.equal(d.roles.length, 1);
+  assert.doesNotMatch(JSON.stringify(d), /Filmmaker|Assistant Software Engineer|Supervised 2nd ADs/);
+});
+
 test("repeated per-page headers never become bullets", () => {
   // LinkedIn stamps "Danny Jones Resume" + "Page X of Y" on every page.
   // When the footer splits across extraction lines, the name half survives
