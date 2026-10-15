@@ -377,7 +377,7 @@ export function App() {
       screen, view: tab, modal, busy,
       hasResume, hasRole: Boolean(meta.role.trim()),
       hasJob: Boolean(jobText.trim().length > 20 || readySources.some((source) => ["job", "application"].includes(source.kind))),
-      canBegin, analysis, doc, questions, questionIndex, questionStatus, answers,
+      canBegin: hasResume && hasOpportunity, analysis, doc, questions, questionIndex, questionStatus, answers,
       ledger, tailored, justExported, aiConsent, aiEnabled,
       supports: [...careerSources.map((item) => item.text), ...answerTexts,
         [doc?.summary, ...(doc?.roles || []).flatMap((role) => [role.title, role.company, ...(role.bullets || [])]), ...(doc?.highlights || []), ...(doc?.skills || [])].join("\n")],
