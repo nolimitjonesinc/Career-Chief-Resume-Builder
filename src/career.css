@@ -65,3 +65,23 @@ label>input,label>textarea,label>select{margin-top:8px}
 .tier-option span{font-size:13px;color:var(--muted);text-align:right}
 .no-resume{display:flex;margin-top:10px}.starter-jobs{margin:22px 0 4px;font-size:15px}.starter-job{border:1px solid var(--line);border-radius:9px;padding:4px 14px 12px;margin:10px 0;background:#fafcfa}
 .ai-toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}.ai-toggle input{width:16px;height:16px;margin:0;accent-color:var(--green)}
+
+/* Chat tab: message list + one input box. Same palette and controls as the
+   rest of the workspace; no new panels or settings. */
+.chat-pane{max-width:760px}
+.chat-ai-off{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#eef5f0;border:1px solid #bad6c4;border-radius:8px;padding:14px 16px;margin:18px 0}
+.chat-ai-off p{margin:0;font-size:13px;color:var(--ink)}
+.chat-messages{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.chat-empty{font-size:13px}
+.chat-msg{border:1px solid var(--line);border-radius:8px;padding:12px 15px;background:#fff}
+.chat-msg.chat-you{background:#f5f8f6}
+.chat-msg strong{font-size:12px}
+.chat-msg p{margin:4px 0 0;font-size:14px}
+.chat-msg .chat-approved{font-size:12px;color:var(--green)}
+.chat-form{margin-top:8px}
+.chat-form>label{margin-bottom:8px}
+.chat-input-row{display:flex;gap:10px}
+.chat-input-row input{flex:1}
+.chat-input-row .primary{white-space:nowrap}
+.chat-form .quiet{display:flex;align-items:center;gap:5px;margin-top:8px}
+.proposal-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:4px}

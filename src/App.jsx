@@ -28,6 +28,9 @@ import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
 import { ResumePreview } from "./components/ResumePreview";
+import { ChatTab } from "./components/Chat";
+import { applyChatProposal as applyChatProposalToDoc, chatAllowed, draftChatProposal } from "./lib/chat";
+import { unsupportedNumbers } from "../shared/claims.mjs";
 import { blankJob, starterReady, starterResumeText } from "./lib/starter";
 
 const blankMeta = { company: "", role: "" };
@@ -58,6 +61,13 @@ export function App() {
   const [answer, setAnswer] = useState("");
   const [answers, setAnswers] = useState(initialDraft?.answers || []);
   const [proposal, setProposal] = useState("");
+  // Chat mode (v1): session-only messages + one pending proposal at a time.
+  // Chat history is deliberately NOT in the saved-draft effect below — the
+  // doc + evidence ledger are the memory, and chat never persists.
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatProposal, setChatProposal] = useState(null);
+  const [chatSending, setChatSending] = useState(false);
   const [help, setHelp] = useState(false);
   const [modal, setModal] = useState(null);
   const [sourceDraft, setSourceDraft] = useState({ ...blankSource });
@@ -307,7 +317,7 @@ export function App() {
 
   // Latest proposal state, read after an await to detect that the user moved on.
   const live = useRef({});
-  live.current = { proposal, qid: currentQuestion?.id, modal };
+  live.current = { proposal, qid: currentQuestion?.id, modal, chatProposal };
 
   // Optional AI rewrite of the proposed line. Returns a message for the dialog,
   // because the page banners sit behind the open dialog.
@@ -322,6 +332,91 @@ export function App() {
       // their wording wins (Rule 4).
       if (now.qid !== snap.qid || now.modal !== "proposal" || now.proposal !== snap.proposal) return "You changed the wording while that was running, so your version was kept.";
       setProposal(result.proposal);
+      return result.note ? `Revised. ${result.note}` : "Revised. Check it before you approve.";
+    } catch (error) { return `${error.message} Your wording is unchanged.`; }
+  }
+
+  // Chat mode: a freeform request becomes a proposal in the SAME approval
+  // modal as the interview (modal === "proposal"). Drafting never touches
+  // the doc; only applyChatProposal (Approve) lands a change, and
+  // rejecting — or just closing the dialog — discards it.
+  async function sendChat() {
+    const text = chatInput.trim();
+    if (!text || !chatAllowed(aiConsent) || chatSending) return;
+    const userMessage = { id: uid(), role: "user", text };
+    setChatMessages((items) => [...items, userMessage]);
+    setChatInput("");
+    const assist = (reply, extra = {}) => setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: reply, ...extra }]);
+    const supports = [...careerSources.map((item) => item.text), ...answerTexts,
+      [doc.summary, ...(doc.roles || []).flatMap((role) => [role.title, role.company, ...(role.bullets || [])]), ...(doc.highlights || []), ...(doc.skills || [])].join("\n")];
+    const drafted = draftChatProposal(doc, text, supports);
+    if (!drafted) { assist("Say a bit more — for example, “make my first bullet stronger” or “actually, I led that project.”"); return; }
+    if (drafted.status === "gap") {
+      assist("That sounds like something you haven't done, so I won't put it on the resume. Tell me what you did do instead and I'll propose that wording.");
+      return;
+    }
+    let proposal = { ...drafted, id: uid(), text: drafted.proposed, supports };
+    // Same optional AI polish as the interview's Revise button: only when
+    // this session's analysis came from AI and consent is on. A failed
+    // polish keeps the local draft; the figures check runs again either way.
+    if (aiFollowUpAllowed(analysis?.researchMode, aiConsent)) {
+      setChatSending(true);
+      try {
+        const response = await fetch("/api/ai/revise", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, answer: text, priorAnswers: answers.map((item) => ({ text: item.text })), current: drafted.proposed, instruction: text }) });
+        const result = await response.json();
+        if (response.ok && result.proposal) {
+          proposal = { ...proposal, text: result.proposal, unsupportedNumbers: unsupportedNumbers(result.proposal, supports) };
+        }
+      } catch { /* Local draft stands; the user still reviews it. */ }
+      finally { setChatSending(false); }
+    }
+    setChatProposal(proposal);
+    setModal("proposal");
+  }
+
+  function applyChatProposal() {
+    if (!chatProposal) return;
+    const line = chatProposal.text.trim();
+    if (!line) return;
+    setHistory((items) => [...items, { ...doc }]);
+    setDoc((value) => applyChatProposalToDoc(value, { ...chatProposal, proposed: line }));
+    // The request itself is user evidence, recorded like an interview
+    // answer so the evidence ledger can trace the approved line back to it.
+    const entry = { id: uid(), questionId: `chat-${chatProposal.id}`, topic: `Chat: ${chatProposal.request.slice(0, 60)}`, question: chatProposal.request, text: chatProposal.request, resumeLine: line };
+    setAnswers((items) => [...items, entry]);
+    setCareerBank((items) => [...items, { id: uid(), topic: entry.topic, question: chatProposal.request, text: chatProposal.request, origin: "Chat" }]);
+    setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: "Approved — your resume is updated. Undo is under the working resume if you change your mind.", approvedLine: line }]);
+    setChatProposal(null);
+    setModal(null);
+    setNotice("Chat change approved and the working resume was updated. Undo is available.");
+  }
+
+  function rejectChatProposal() {
+    if (!chatProposal) { setModal(null); return; }
+    setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: "Got it — nothing changed. Your resume is exactly as it was." }]);
+    setChatProposal(null);
+    setModal(null);
+  }
+
+  // Closing the dialog (X, Escape, backdrop) discards a pending chat
+  // proposal exactly like Reject — nothing lands without Approve.
+  function closeDialog() {
+    if (modal === "proposal" && chatProposal) { rejectChatProposal(); return; }
+    setModal(null);
+  }
+
+  // Optional AI rewrite of the pending chat proposal, mirroring
+  // reviseProposal for interview proposals (same endpoint, same guard).
+  async function reviseChatProposal(instruction) {
+    const snap = live.current.chatProposal;
+    if (!snap) return "Nothing to revise.";
+    try {
+      const response = await fetch("/api/ai/revise", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, answer: snap.request, priorAnswers: answers.map((item) => ({ text: item.text })), current: snap.text, instruction }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "That change could not be made.");
+      const now = live.current;
+      if (!now.chatProposal || now.chatProposal.id !== snap.id || now.modal !== "proposal") return "You changed the wording while that was running, so your version was kept.";
+      setChatProposal((value) => value ? { ...value, text: result.proposal, unsupportedNumbers: unsupportedNumbers(result.proposal, value.supports || []) } : value);
       return result.note ? `Revised. ${result.note}` : "Revised. Check it before you approve.";
     } catch (error) { return `${error.message} Your wording is unchanged.`; }
   }
@@ -519,6 +614,7 @@ export function App() {
     setAnswers(target.answers); setQuestionStatus(target.questionStatus); setQuestionIndex(target.questionIndex);
     setSources(target.sources); setResumeText(target.resumeText || ""); setJobText(target.jobText || ""); setManualEdit(target.manualEdit || false);
     setHistory([]); setTab("case"); setModal(null);
+    setChatMessages([]); setChatProposal(null); setChatInput("");
     setNotice("Opportunity opened. Its questions and resume are separate; confirmed career answers remain in your evidence bank.");
   }
 
@@ -536,6 +632,7 @@ export function App() {
     setProjectName(key); setMeta(nextMeta); setSources(nextSources); setResumeText(""); setJobText("");
     setAnalysis(next); setDoc(next.doc); setQuestions(next.questions); setAnswers([]); setQuestionStatus({}); setQuestionIndex(0);
     setHistory([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
+    setChatMessages([]); setChatProposal(null); setChatInput("");
     setNewOpportunity({ company: "", role: "", job: "" });
     setNotice("New opportunity created from your career evidence. Its hiring case and resume are ready to refine.");
     if (aiPlanAllowed(aiEnabled, aiConsent)) runAiPlan(nextSources, nextMeta);
@@ -573,13 +670,14 @@ export function App() {
         <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span>{aiEnabled && <label className="ai-toggle"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span>AI {aiConsent ? "on" : "off"}</span></label>}<button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
       </div>
       <nav className="workspace-nav" aria-label="Workspace">
-        {[['case','Your hiring case'],['research','Company & role'],['interview',researching ? "Interview plan · preparing…" : `Interview plan · ${completed}/${questions.length}`],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} disabled={id === "interview" && researching} onClick={() => setTab(id)}>{label}</button>)}
+        {[['case','Your hiring case'],['research','Company & role'],['interview',researching ? "Interview plan · preparing…" : `Interview plan · ${completed}/${questions.length}`],['chat','Chat'],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} disabled={id === "interview" && researching} onClick={() => setTab(id)}>{label}</button>)}
       </nav>
       <div className="workspace">
         <main className="main-pane">
           {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => setTab("interview")} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
           {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} answer={answer} setAnswer={setAnswer} review={reviewAnswer} skip={skipQuestion} help={help} setHelp={setHelp} sample={() => setAnswer(currentQuestion?.sample || "")} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} busy={busy} />}
+          {tab === "chat" && <ChatTab messages={chatMessages} input={chatInput} setInput={setChatInput} onSend={sendChat} sending={chatSending} aiConsent={aiConsent} onEnableAi={() => setAiConsent(true)} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
           {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
@@ -592,11 +690,11 @@ export function App() {
       </div>
     </>}
 
-    <dialog ref={dialog} onCancel={() => setModal(null)} className={modal === "editor" ? "editor-dialog" : ""}>
-      <div className="dialog-top"><span className="eyebrow">Career Chief</span><button autoFocus aria-label="Close panel" onClick={() => setModal(null)}><X size={23} /></button></div>
+    <dialog ref={dialog} onCancel={closeDialog} className={modal === "editor" ? "editor-dialog" : ""}>
+      <div className="dialog-top"><span className="eyebrow">Career Chief</span><button autoFocus aria-label="Close panel" onClick={closeDialog}><X size={23} /></button></div>
       {modal === "source-add" && <SourceForm draft={sourceDraft} setDraft={setSourceDraft} prepareFile={prepareDraftFile} save={saveSourceDraft} busy={Boolean(busy)} />}
       {modal === "source-view" && selectedSource && <SourceView source={selectedSource} />}
-      {modal === "proposal" && currentQuestion && <Proposal doc={doc} question={currentQuestion} answer={answer} proposal={proposal} setProposal={setProposal} apply={applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={proposalSupports} canRevise={aiFollowUpAllowed(analysis?.researchMode, aiConsent)} revise={reviseProposal} />}
+      {modal === "proposal" && (currentQuestion || chatProposal) && <Proposal doc={doc} question={currentQuestion} answer={chatProposal ? chatProposal.request : answer} proposal={chatProposal ? chatProposal.text : proposal} setProposal={chatProposal ? (value) => setChatProposal((current) => current ? { ...current, text: value } : current) : setProposal} apply={chatProposal ? applyChatProposal : applyProposal} manual={manualEdit} requirements={analysis?.requirements || []} supports={chatProposal ? chatProposal.supports : proposalSupports} canRevise={aiFollowUpAllowed(analysis?.researchMode, aiConsent)} revise={chatProposal ? reviseChatProposal : reviseProposal} chat={Boolean(chatProposal)} chatProposal={chatProposal} onReject={chatProposal ? rejectChatProposal : undefined} />}
       {modal === "ledger" && ledger && <><h2>Where each line came from.</h2><EvidenceLedger ledger={ledger} /></>}
       {modal === "editor" && <ResumeEditor doc={doc} save={saveEditor} />}
       {modal === "finish" && doc && <Finish doc={doc} completed={completed} total={questions.length} analysis={analysis} answers={answers} download={downloadResume} edit={() => setModal("editor")} ledger={ledger} openLedger={() => setModal("ledger")} tailor={startTailor} pro={pro} openPro={openPro} />}
@@ -734,7 +832,13 @@ function SourceForm({ draft, setDraft, prepareFile, save, busy }) {
 
 function SourceView({ source }) { return <><span className="badge">{sourceLabels[source.kind]} · {source.origin}</span><h2>{source.name}</h2>{source.url && <a className="source-url" href={source.url} target="_blank" rel="noreferrer">{source.url} <ArrowSquareOut size={15} /></a>}<h3>Extracted text</h3><div className="extracted-text">{source.text}</div><p className="quiet">This is the text used by the prototype analyzer. Production should retain source URL, retrieval date, excerpt, and verification status.</p></>; }
 
-function Proposal({ doc, question, answer, proposal, setProposal, apply, manual, requirements, supports, canRevise, revise }) { return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">NEWEST ROLE · THIS WORDING IS ADDED TO ITS BULLETS</span><ul className="prewrap quiet">{((doc.roles || [])[0]?.bullets || []).map((bullet, index) => <li key={index}>{bullet}</li>)}</ul></> : <><span className="eyebrow">NEW LINES FROM YOUR ANSWERS</span><ul className="old-copy">{(doc.highlights || []).map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
+function Proposal({ doc, question, answer, proposal, setProposal, apply, manual, requirements, supports, canRevise, revise, chat, chatProposal, onReject }) {
+  // Chat proposals reuse this same approval dialog: same Approve gate, same
+  // "nothing lands until you approve" rule — only the context differs (a
+  // freeform message instead of an interview question, and the exact line
+  // being replaced instead of an append target).
+  if (chat && chatProposal) return <><span className="badge">Based on your message · Chat</span><h2>Review the change before it lands.</h2><p>Your message becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR MESSAGE</span><p className="answer-quote">{answer}</p>{chatProposal.target?.kind === "new" ? <><span className="eyebrow">NEW LINE FROM YOUR ANSWERS</span><p className="quiet">This becomes a new line from your answers — your words, not a verified fact.</p></> : <><span className="eyebrow">{(chatProposal.target?.label || "Current wording").toUpperCase()}</span><ul className="old-copy">{[chatProposal.original].map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label>{chatProposal.unsupportedNumbers?.length > 0 && <div className="caution">This wording contains figures not found in your material: {chatProposal.unsupportedNumbers.join(", ")}. Confirm or remove them before approving.</div>}<ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">{chatProposal.note}</p><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><div className="proposal-actions"><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button>{onReject && <button className="secondary" onClick={onReject}>Reject — don’t change anything</button>}</div></>;
+  return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">NEWEST ROLE · THIS WORDING IS ADDED TO ITS BULLETS</span><ul className="prewrap quiet">{((doc.roles || [])[0]?.bullets || []).map((bullet, index) => <li key={index}>{bullet}</li>)}</ul></> : <><span className="eyebrow">NEW LINES FROM YOUR ANSWERS</span><ul className="old-copy">{(doc.highlights || []).map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
 
 function ResumeEditor({ doc, save }) {
   const [name, setName] = useState(doc.name || "");
