@@ -3,8 +3,8 @@ import "./career.css";
 import "./trust.css";
 import {
   ArrowCounterClockwise, ArrowRight, ArrowSquareOut, CaretDown, Check, CheckCircle,
-  Circle, DownloadSimple, FileDoc, FileHtml, FilePdf, FilePpt, FileText, Globe, Leaf, Link,
-  MagnifyingGlass, Paperclip, Plus, ShieldCheck, Sparkle, Target, UploadSimple, X,
+  DownloadSimple, FileDoc, FileHtml, FilePdf, FilePpt, FileText, Globe, Leaf, Link,
+  MagnifyingGlass, Paperclip, Plus, ShieldCheck, Target, UploadSimple, X,
 } from "@phosphor-icons/react";
 import { acceptedFiles, extractFile, extractUrl } from "./lib/ingest";
 import { analyzeSources, coverageFor, focusLabels, isCareerSource, isRoleSource, proposeResumeUpdate, sampleSources, sourceLabels, textToRoles } from "./lib/analyze";
@@ -17,7 +17,6 @@ import { EvidenceLedger, LedgerButton } from "./components/Ledger";
 import { EvidenceColumns } from "./components/Coverage";
 import { ParseCheck } from "./components/ParseCheck";
 import { ProposalWhy } from "./components/ProposalWhy";
-import { Showcase } from "./components/Showcase";
 import { CompareJobs } from "./components/Compare";
 import { Tour } from "./components/Tour";
 import { ProDialog, ProHeaderControl } from "./components/Pro";
@@ -28,8 +27,23 @@ import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
 import { ResumePreview } from "./components/ResumePreview";
-import { ChatTab } from "./components/Chat";
-import { applyChatProposal as applyChatProposalToDoc, chatAllowed, draftChatProposal } from "./lib/chat";
+import { ConciergeDock } from "./components/Concierge";
+import "./components/concierge.css";
+import { applyChatProposal as applyChatProposalToDoc, draftChatProposal, findChatTarget, strengthenLine } from "./lib/chat";
+import {
+  baselineMessage,
+  conciergeFocus,
+  conciergePlaceholder,
+  conciergeReadiness,
+  conciergeStage,
+  localConciergeReply,
+  nextQuestion,
+  nextStepText,
+  questionMessage,
+  quickActions,
+  CONCIERGE_GREETING_INTAKE,
+  CONCIERGE_GREETING_RETURNING,
+} from "./lib/concierge";
 import { unsupportedNumbers } from "../shared/claims.mjs";
 import { blankJob, starterReady, starterResumeText } from "./lib/starter";
 
@@ -46,7 +60,9 @@ const savedByNewer = isNewerDraft(rawDraft);
 
 export function App() {
   const [screen, setScreen] = useState(initialDraft?.screen || "intake");
-  const [tab, setTab] = useState(initialDraft?.tab || "case");
+  // The old "chat" tab is gone: the concierge dock IS the chat, on every
+  // screen. A saved draft pointing at it lands on the hiring case instead.
+  const [tab, setTab] = useState(initialDraft?.tab === "chat" ? "case" : initialDraft?.tab || "case");
   const [meta, setMeta] = useState(initialDraft?.meta || { ...blankMeta });
   const [resumeText, setResumeText] = useState(initialDraft?.resumeText || "");
   const [jobText, setJobText] = useState(initialDraft?.jobText || "");
@@ -61,13 +77,16 @@ export function App() {
   const [answer, setAnswer] = useState("");
   const [answers, setAnswers] = useState(initialDraft?.answers || []);
   const [proposal, setProposal] = useState("");
-  // Chat mode (v1): session-only messages + one pending proposal at a time.
-  // Chat history is deliberately NOT in the saved-draft effect below — the
-  // doc + evidence ledger are the memory, and chat never persists.
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
+  // Concierge (replaces the old Chat tab): session-only messages, like chat
+  // was. The doc + evidence ledger are the memory; the concierge never
+  // persists. One pending proposal at a time, approved in the same dialog.
+  const [conciergeMessages, setConciergeMessages] = useState([]);
+  const [conciergeInput, setConciergeInput] = useState("");
+  const [conciergeSending, setConciergeSending] = useState(false);
+  const [conciergeCollapsed, setConciergeCollapsed] = useState(false);
   const [chatProposal, setChatProposal] = useState(null);
-  const [chatSending, setChatSending] = useState(false);
+  const [tailored, setTailored] = useState(initialDraft?.tailored || false);
+  const [justExported, setJustExported] = useState(false);
   const [help, setHelp] = useState(false);
   const [modal, setModal] = useState(null);
   const [sourceDraft, setSourceDraft] = useState({ ...blankSource });
@@ -116,9 +135,9 @@ export function App() {
   }, []);
   useEffect(() => {
     if (savedByNewer) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, draftVersion: DRAFT_VERSION })); }
+    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, tailored, draftVersion: DRAFT_VERSION })); }
     catch { /* Browser storage may be unavailable or full; the current session still works. */ }
-  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareList]);
+  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareList, tailored]);
 
   const currentQuestion = questions[questionIndex];
   const completed = Object.values(questionStatus).filter((value) => value === "answered").length;
@@ -230,6 +249,8 @@ export function App() {
     setQuestionIndex(0);
     setScreen("analysis");
     setNotice("");
+    const baseline = baselineMessage(next);
+    say(baseline.text, baseline.actions);
     if (aiPlanAllowed(aiEnabled, aiConsent)) runAiPlan(intakeSources);
   }
 
@@ -250,6 +271,7 @@ export function App() {
         setQuestionStatus({});
       }
       setNotice("The researched hiring case is ready. Public findings have clickable source links.");
+      say(`I researched ${targetMeta.company || "the company"} — your hiring case now includes public findings with source links.`, [{ label: "Open my hiring case", action: "open-case" }]);
     } catch (error) { setNotice(`${error.message} The working draft and source-based interview remain available.`); }
     finally { setBusy(""); }
   }
@@ -291,14 +313,18 @@ export function App() {
     }
   }
 
-  async function reviewAnswer() {
-    if (!currentQuestion || !answer.trim()) return;
+  // The answer may come from the concierge dock (its input IS the answer box
+  // during the interview) or from the question card. Either way it goes
+  // through the same review → proposal → approval flow.
+  async function reviewAnswer(answerOverride) {
+    const text = (answerOverride ?? answer).trim();
+    if (!currentQuestion || !text) return;
     setPendingFollowUp(null);
-    let proposed = proposeResumeUpdate(doc, currentQuestion, answer);
+    let proposed = proposeResumeUpdate(doc, currentQuestion, text);
     if (aiFollowUpAllowed(analysis?.researchMode, aiConsent)) {
       setBusy("Checking your answer against the hiring case…");
       try {
-        const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer, priorAnswers: answers, askedTopics: questions.slice(0, questionIndex + 1).map((item) => item.topic), pendingTopics: questions.slice(questionIndex + 1).map((item) => item.topic) }) });
+        const response = await fetch("/api/ai/follow-up", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, question: currentQuestion, answer: text, priorAnswers: answers, askedTopics: questions.slice(0, questionIndex + 1).map((item) => item.topic), pendingTopics: questions.slice(questionIndex + 1).map((item) => item.topic) }) });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "That answer could not be analyzed.");
         proposed = result.proposal;
@@ -336,42 +362,201 @@ export function App() {
     } catch (error) { return `${error.message} Your wording is unchanged.`; }
   }
 
-  // Chat mode: a freeform request becomes a proposal in the SAME approval
-  // modal as the interview (modal === "proposal"). Drafting never touches
-  // the doc; only applyChatProposal (Approve) lands a change, and
-  // rejecting — or just closing the dialog — discards it.
-  async function sendChat() {
-    const text = chatInput.trim();
-    if (!text || !chatAllowed(aiConsent) || chatSending) return;
-    const userMessage = { id: uid(), role: "user", text };
-    setChatMessages((items) => [...items, userMessage]);
-    setChatInput("");
-    const assist = (reply, extra = {}) => setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: reply, ...extra }]);
-    const supports = [...careerSources.map((item) => item.text), ...answerTexts,
-      [doc.summary, ...(doc.roles || []).flatMap((role) => [role.title, role.company, ...(role.bullets || [])]), ...(doc.highlights || []), ...(doc.skills || [])].join("\n")];
-    const drafted = draftChatProposal(doc, text, supports);
-    if (!drafted) { assist("Say a bit more — for example, “make my first bullet stronger” or “actually, I led that project.”"); return; }
-    if (drafted.status === "gap") {
-      assist("That sounds like something you haven't done, so I won't put it on the resume. Tell me what you did do instead and I'll propose that wording.");
-      return;
-    }
-    let proposal = { ...drafted, id: uid(), text: drafted.proposed, supports };
-    // Same optional AI polish as the interview's Revise button: only when
-    // this session's analysis came from AI and consent is on. A failed
-    // polish keeps the local draft; the figures check runs again either way.
-    if (aiFollowUpAllowed(analysis?.researchMode, aiConsent)) {
-      setChatSending(true);
-      try {
-        const response = await fetch("/api/ai/revise", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: meta.role, answer: text, priorAnswers: answers.map((item) => ({ text: item.text })), current: drafted.proposed, instruction: text }) });
-        const result = await response.json();
-        if (response.ok && result.proposal) {
-          proposal = { ...proposal, text: result.proposal, unsupportedNumbers: unsupportedNumbers(result.proposal, supports) };
-        }
-      } catch { /* Local draft stands; the user still reviews it. */ }
-      finally { setChatSending(false); }
-    }
+  // --- Concierge -----------------------------------------------------------
+  // The dock is the only chat surface. Messages are session-only; the doc +
+  // evidence ledger are the memory. Nothing the concierge says ever changes
+  // the doc except through the proposal dialog's Approve button.
+
+  function say(text, actions) {
+    setConciergeMessages((items) => [...items, { id: uid(), role: "assistant", text, ...(actions?.length ? { actions } : {}) }]);
+  }
+
+  // Snapshot the concierge brain reads. Rebuilt on every render from live state.
+  function conciergeState() {
+    return {
+      screen, view: tab, modal, busy,
+      hasResume, hasRole: Boolean(meta.role.trim()),
+      hasJob: Boolean(jobText.trim().length > 20 || readySources.some((source) => ["job", "application"].includes(source.kind))),
+      canBegin, analysis, doc, questions, questionIndex, questionStatus, answers,
+      ledger, tailored, justExported, aiConsent, aiEnabled,
+      supports: [...careerSources.map((item) => item.text), ...answerTexts,
+        [doc?.summary, ...(doc?.roles || []).flatMap((role) => [role.title, role.company, ...(role.bullets || [])]), ...(doc?.highlights || []), ...(doc?.skills || [])].join("\n")],
+    };
+  }
+
+  // First words: a fresh session gets the promise; a returning session gets
+  // a pickup line. Either way the concierge speaks first, unprompted.
+  const greeted = useRef(false);
+  useEffect(() => {
+    if (greeted.current) return;
+    greeted.current = true;
+    say(initialDraft?.analysis || initialDraft?.doc ? CONCIERGE_GREETING_RETURNING : CONCIERGE_GREETING_INTAKE);
+  }, []);
+
+  // The guided focus ring: exactly one element wears .concierge-focus at a
+  // time. Visual only — focus is never stolen from what the user is typing.
+  // While a non-approval dialog is open the ring stays off (it would sit
+  // behind the dialog); the proposal/finish dialogs keep their own targets.
+  const cState = conciergeState();
+  const cStage = conciergeStage(cState);
+  const cFocus = modal && modal !== "proposal" && modal !== "finish" ? null : conciergeFocus(cState);
+  const cReadiness = conciergeReadiness(cState);
+  const cNextStep = nextStepText(cState);
+  const cActions = quickActions(cState);
+  useEffect(() => {
+    document.querySelectorAll(".concierge-focus").forEach((el) => el.classList.remove("concierge-focus"));
+    if (!cFocus) return;
+    const el = document.querySelector(`[data-focus="${cFocus}"]`);
+    if (!el) return;
+    el.classList.add("concierge-focus");
+    // The dock's own targets are always on screen; only scroll for the rest.
+    if (!["concierge-input", "back-to-question"].includes(cFocus)) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [cFocus, screen, tab, modal]);
+
+  function openConciergeProposal(drafted, requestText) {
+    const proposal = { ...drafted, id: uid(), text: drafted.proposed, request: requestText, supports: conciergeState().supports };
     setChatProposal(proposal);
     setModal("proposal");
+  }
+
+  // One concierge action, from a dock chip or a message button. Every action
+  // either moves the view, opens a dialog, or posts a message — none of them
+  // touches the doc.
+  function handleConciergeAction(action, payload) {
+    if (action === "start-interview" || action === "back-to-question") {
+      // Never land on a blank workspace: the interview needs a built case.
+      if (!analysis || !doc) { say("The interview opens once your hiring case is built. Add your resume and the job, then press Analyze."); return; }
+      setScreen("workspace");
+      setTab("interview");
+      const q = nextQuestion(questions, questionStatus);
+      if (q) { const m = questionMessage(q); say(m.text, m.actions); }
+      return;
+    }
+    if (action === "open-case") { setScreen("workspace"); setTab("case"); return; }
+    if (action === "sample") { loadSample(); return; }
+    if (action === "skip") { skipQuestion(); return; }
+    if (action === "help") {
+      const q = nextQuestion(questions, questionStatus);
+      if (q) { setScreen("workspace"); setTab("interview"); setHelp(true); say(`Take your time. Under the question I put a hint: ${q.tip}`); }
+      else say("Nothing pending right now — ask me anything, or finish your resume.");
+      return;
+    }
+    if (action === "finish") {
+      if (!doc) { say("Finish needs a resume first — add your resume and the job, then I'll build your starting point."); return; }
+      setModal("finish"); return;
+    }
+    if (action === "undo") { undoResume(); return; }
+    if (action === "sources" || action === "compare" || action === "career" || action === "case") {
+      if (screen !== "workspace" || !analysis) { say("That opens once your hiring case is built — add your resume and the job first."); return; }
+      if (action === "sources") setTab("research");
+      else if (action === "compare") setTab("compare");
+      else if (action === "career") setTab("career");
+      else setTab("case");
+      return;
+    }
+    if (action === "tailor") {
+      if (!doc) { say("Tailoring needs a resume first — add your resume and the job, then I'll tailor it."); return; }
+      startTailor(); return;
+    }
+    if (action === "add-source") { setSourceDraft({ ...blankSource }); setModal("source-add"); return; }
+    if (action === "new-opportunity") { setModal("new-opportunity"); return; }
+    if (action === "next") { say(nextStepText(conciergeState())); return; }
+    if (action === "challenge" && payload) {
+      const target = findChatTarget(doc, payload);
+      if (target) {
+        openConciergeProposal({ status: "proposal", target, original: target.original, proposed: strengthenLine(target.original), request: `Make this line stronger: ${payload}`, evidence: "reword", unsupportedNumbers: [], note: "Same facts, stronger framing. Check it still sounds like you before approving." }, `Make this line stronger: ${payload}`);
+      } else {
+        say("I couldn't find that line in the current resume — it may have changed since. Tell me which line you mean.");
+      }
+      return;
+    }
+  }
+
+  // A structured action from the AI concierge, already re-validated server-side.
+  function handleConciergeAiAction(action, text) {
+    if (!action || action.type === "none") return;
+    if (action.type === "ask") {
+      const index = questions.findIndex((item) => item.id === action.questionId);
+      if (index >= 0) {
+        setQuestionIndex(index);
+        setTab("interview");
+        const m = questionMessage(questions[index]);
+        say(m.text, m.actions);
+      }
+      return;
+    }
+    if (action.type === "propose") {
+      openConciergeProposal({ status: "proposal", target: action.target, original: action.original || "", proposed: action.proposed, request: text, evidence: "user", unsupportedNumbers: action.unsupportedNumbers || [], note: "" }, text);
+      return;
+    }
+    if (action.type === "challenge") {
+      say(`One line worth a second look: “${action.line}” — ${action.reason || "it could be stronger."}`, [{ label: "Suggest a stronger version", action: "challenge", payload: action.line }]);
+      return;
+    }
+    if (action.type === "search") {
+      say(`Worth a quick search: your email, documents, or notes for “${action.query}”. Looking for: ${action.lookingFor}`, [{ label: "Add what I find", action: "add-source" }]);
+      return;
+    }
+    if (action.type === "stage") {
+      if (action.view === "finish") setModal("finish");
+      else setTab(action.view);
+    }
+  }
+
+  async function sendConcierge() {
+    const text = conciergeInput.trim();
+    if (!text || conciergeSending) return;
+    setConciergeMessages((items) => [...items, { id: uid(), role: "user", text }]);
+    setConciergeInput("");
+    const state = conciergeState();
+    const stage = conciergeStage(state);
+
+    // Interview answers: a statement answers the pending question. A question
+    // (ends in "?") goes to the concierge instead — "what's my strongest fit?"
+    // is not an answer.
+    if (stage === "interview" && !text.endsWith("?")) {
+      const local = localConciergeReply(state, text);
+      if (local.kind === "answer") { setAnswer(text); await reviewAnswer(text); return; }
+      if (local.kind === "command") { handleConciergeAction(local.command); return; }
+      if (local.kind === "proposal") { openConciergeProposal(local.proposal, text); return; }
+      say(local.text);
+      return;
+    }
+
+    // Deterministic commands never need the model.
+    const local = localConciergeReply(state, text);
+    if (local.kind === "command") { handleConciergeAction(local.command); return; }
+
+    // AI on: the real concierge converses. AI off or failed: the local brain.
+    if (aiEnabled && aiConsent) {
+      setConciergeSending(true);
+      try {
+        const response = await fetch("/api/ai/concierge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+          role: meta.role, company: meta.company, stage,
+          currentQuestion: nextQuestion(questions, questionStatus),
+          doc: doc ? { summary: doc.summary, roles: doc.roles, highlights: doc.highlights, skills: doc.skills } : null,
+          known: analysis?.known || [], gaps: analysis?.gaps || [],
+          requirements: (analysis?.requirements || []).map((item) => item.label || item.key),
+          questions: questions.slice(0, 12).map((q) => ({ id: q.id, topic: q.topic, prompt: q.prompt })),
+          answers: answers.slice(-6).map((item) => item.text),
+          messages: [...conciergeMessages, { role: "user", text }].slice(-8).map((m) => ({ role: m.role === "user" ? "user" : "assistant", text: m.text })),
+          message: text,
+        }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Concierge could not answer.");
+        say(result.reply);
+        handleConciergeAiAction(result.action, text);
+        return;
+      } catch {
+        // Fall through to the local brain; the user still gets an answer.
+        say("AI couldn't answer that — here's what I can do from what you gave me.");
+      } finally { setConciergeSending(false); }
+    }
+
+    const fallback = localConciergeReply(state, text);
+    if (fallback.kind === "proposal") openConciergeProposal(fallback.proposal, text);
+    else if (fallback.kind === "command") handleConciergeAction(fallback.command);
+    else say(fallback.text);
   }
 
   function applyChatProposal() {
@@ -384,16 +569,18 @@ export function App() {
     // answer so the evidence ledger can trace the approved line back to it.
     const entry = { id: uid(), questionId: `chat-${chatProposal.id}`, topic: `Chat: ${chatProposal.request.slice(0, 60)}`, question: chatProposal.request, text: chatProposal.request, resumeLine: line };
     setAnswers((items) => [...items, entry]);
-    setCareerBank((items) => [...items, { id: uid(), topic: entry.topic, question: chatProposal.request, text: chatProposal.request, origin: "Chat" }]);
-    setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: "Approved — your resume is updated. Undo is under the working resume if you change your mind.", approvedLine: line }]);
+    setCareerBank((items) => [...items, { id: uid(), topic: entry.topic, question: chatProposal.request, text: chatProposal.request, origin: "Concierge" }]);
     setChatProposal(null);
     setModal(null);
     setNotice("Chat change approved and the working resume was updated. Undo is available.");
+    say(`Approved — your resume is updated.`, [{ label: "Undo", action: "undo" }]);
+    const next = nextQuestion(questions, questionStatus);
+    if (next) { const m = questionMessage(next); say(m.text, m.actions); }
   }
 
   function rejectChatProposal() {
     if (!chatProposal) { setModal(null); return; }
-    setChatMessages((items) => [...items, { id: uid(), role: "assistant", text: "Got it — nothing changed. Your resume is exactly as it was." }]);
+    say("Got it — nothing changed. Your resume is exactly as it was.");
     setChatProposal(null);
     setModal(null);
   }
@@ -448,8 +635,10 @@ export function App() {
     const result = tailorState.result;
     setHistory((items) => [...items, { ...doc }]);
     setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { roles: result.roles } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
+    setTailored(true);
     setModal(null);
     setNotice("Tailoring applied. Undo is under the working resume if you change your mind.");
+    say("Tailoring applied — your resume now leads with what this job asks for.");
   }
 
   function applyProposal() {
@@ -492,6 +681,11 @@ export function App() {
     setModal(null);
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
     setNotice("Answer saved as evidence and the working resume was updated. Undo is available.");
+    say("Approved — your answer is now evidence on your resume.");
+    const remaining = questions.filter((item) => item.id !== question.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
+    const next = remaining[0] || null;
+    if (next) { const m = questionMessage(next); say(m.text, m.actions); }
+    else say("That's every question — your resume is ready whenever you are.", [{ label: "Finish my resume now", action: "finish" }]);
   }
 
   function skipQuestion() {
@@ -500,6 +694,10 @@ export function App() {
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
     setAnswer("");
     setHelp(false);
+    const remaining = questions.filter((item) => item.id !== currentQuestion.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
+    const next = remaining[0] || null;
+    if (next) { const m = questionMessage(next); say(m.text, m.actions); }
+    else say("Skipped — it stays out of your resume, and nothing is blocked.", [{ label: "Finish my resume now", action: "finish" }]);
   }
 
   function undoResume() {
@@ -595,7 +793,9 @@ export function App() {
     try {
       await exportResume(doc, format);
       recordExport(storedKey);
+      setJustExported(true);
       setNotice(`${format.toUpperCase()} resume created from the current approved draft.`);
+      say(`Done — your ${format.toUpperCase()} resume is downloaded.`, [{ label: "Apply for another job", action: "new-opportunity" }]);
     } catch (error) {
       setNotice(`That export could not be created: ${error.message}`);
     } finally {
@@ -614,8 +814,11 @@ export function App() {
     setAnswers(target.answers); setQuestionStatus(target.questionStatus); setQuestionIndex(target.questionIndex);
     setSources(target.sources); setResumeText(target.resumeText || ""); setJobText(target.jobText || ""); setManualEdit(target.manualEdit || false);
     setHistory([]); setTab("case"); setModal(null);
-    setChatMessages([]); setChatProposal(null); setChatInput("");
+    setConciergeMessages([]); setChatProposal(null); setConciergeInput("");
     setNotice("Opportunity opened. Its questions and resume are separate; confirmed career answers remain in your evidence bank.");
+    say(`Back to ${target.meta.company || "this opportunity"} — ${target.meta.role}. Your confirmed career answers came along.`);
+    const first = (target.questions || [])[0];
+    if (first) { const m = questionMessage(first); say(m.text, m.actions); }
   }
 
   function createOpportunity() {
@@ -632,9 +835,11 @@ export function App() {
     setProjectName(key); setMeta(nextMeta); setSources(nextSources); setResumeText(""); setJobText("");
     setAnalysis(next); setDoc(next.doc); setQuestions(next.questions); setAnswers([]); setQuestionStatus({}); setQuestionIndex(0);
     setHistory([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
-    setChatMessages([]); setChatProposal(null); setChatInput("");
+    setConciergeMessages([]); setChatProposal(null); setConciergeInput("");
     setNewOpportunity({ company: "", role: "", job: "" });
     setNotice("New opportunity created from your career evidence. Its hiring case and resume are ready to refine.");
+    const baseline = baselineMessage(next);
+    say(`New opportunity: ${nextMeta.company} — ${nextMeta.role}. ${baseline.text}`, baseline.actions);
     if (aiPlanAllowed(aiEnabled, aiConsent)) runAiPlan(nextSources, nextMeta);
   }
 
@@ -669,15 +874,11 @@ export function App() {
         <button className="opportunity-name" onClick={() => setModal("opportunity")}><span className="eyebrow">WORKING TOWARD</span><strong>{meta.company || "Target company"} <span>/ {meta.role}</span></strong><CaretDown size={16} /></button>
         <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span>{aiEnabled && <label className="ai-toggle"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span>AI {aiConsent ? "on" : "off"}</span></label>}<button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
       </div>
-      <nav className="workspace-nav" aria-label="Workspace">
-        {[['case','Your hiring case'],['research','Company & role'],['interview',researching ? "Interview plan · preparing…" : `Interview plan · ${completed}/${questions.length}`],['chat','Chat'],['compare','Compare jobs'],['career','Career evidence']].map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} disabled={id === "interview" && researching} onClick={() => setTab(id)}>{label}</button>)}
-      </nav>
       <div className="workspace">
         <main className="main-pane">
-          {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => setTab("interview")} researching={researching} research={() => setTab("research")} />}
+          {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => { setTab("interview"); const q = nextQuestion(questions, questionStatus); if (q) { const m = questionMessage(q); say(m.text, m.actions); } }} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
-          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} answer={answer} setAnswer={setAnswer} review={reviewAnswer} skip={skipQuestion} help={help} setHelp={setHelp} sample={() => setAnswer(currentQuestion?.sample || "")} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} busy={busy} />}
-          {tab === "chat" && <ChatTab messages={chatMessages} input={chatInput} setInput={setChatInput} onSend={sendChat} sending={chatSending} aiConsent={aiConsent} onEnableAi={() => setAiConsent(true)} />}
+          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} skip={skipQuestion} help={help} setHelp={setHelp} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} busy={busy} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
           {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
@@ -707,6 +908,27 @@ export function App() {
       {modal === "start-new" && <StartNew keepable={Boolean(analysis && doc)} evidenceCount={careerBank.length} newJob={() => setModal("new-opportunity")} finish={() => setModal("finish")} wipe={clearLocalDraft} />}
       {modal === "clear" && <><h2>Clear this device’s draft?</h2><p>This deletes the saved career material, sources, answers, and resume from this browser. Download anything you need first.</p><button className="secondary" onClick={() => setModal(null)}>Keep my draft</button><button className="primary" onClick={clearLocalDraft}>Clear draft</button></>}
     </dialog>
+    <ConciergeDock
+      messages={conciergeMessages}
+      input={conciergeInput}
+      setInput={setConciergeInput}
+      onSend={sendConcierge}
+      sending={conciergeSending}
+      stage={cStage}
+      placeholder={conciergePlaceholder(cState)}
+      readiness={cReadiness}
+      nextStep={cNextStep}
+      actions={cActions}
+      onAction={handleConciergeAction}
+      aiEnabled={aiEnabled}
+      aiConsent={aiConsent}
+      onToggleAi={setAiConsent}
+      canFinish={Boolean(doc)}
+      onFinish={() => setModal("finish")}
+      collapsed={conciergeCollapsed}
+      onToggleCollapse={() => setConciergeCollapsed((value) => !value)}
+    />
+    <div className={conciergeCollapsed ? "concierge-spacer collapsed" : "concierge-spacer"} />
     <SiteFooter />
   </>;
 }
@@ -742,24 +964,24 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
 
 function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear, startResume }) {
   return <main className="intake-page">
-    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><Showcase /><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
+    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
       <div className="builder-head"><div><span className="step-number">1</span><h2>Start with what you have.</h2></div><span className="source-count">{sources.length + (resumeText.trim() ? 1 : 0) + (jobText.trim() ? 1 : 0)} sources ready</span></div>
       <SourceBlock icon={<FileText size={22} />} title="Your resume" tour="resume" required note="PDF, Word, HTML, TXT or pasted text">
-        <textarea value={resumeText} onChange={(event) => setResumeText(event.target.value)} placeholder="Paste the resume here, or upload the original file below." />
+        <textarea data-focus="resume-input" value={resumeText} onChange={(event) => setResumeText(event.target.value)} placeholder="Paste the resume here, or upload the original file below." />
         <label className="upload-control"><UploadSimple size={17} /> Upload resume<input type="file" accept={acceptedFiles} onChange={(event) => addFile(event.target.files[0], "resume")} /></label>
         {!resumeText.trim() && <button type="button" className="text-action no-resume" onClick={startResume}>I don't have a resume. Help me write one <ArrowRight size={16} /></button>}
       </SourceBlock>
-      <div className="two-fields"><label>Target company<input value={meta.company} onChange={(event) => setMeta({ ...meta, company: event.target.value })} placeholder="Company name" /></label><label>Target role<input value={meta.role} onChange={(event) => setMeta({ ...meta, role: event.target.value })} placeholder="Role title" required /></label></div>
+      <div className="two-fields"><label>Target company<input value={meta.company} onChange={(event) => setMeta({ ...meta, company: event.target.value })} placeholder="Company name" /></label><label>Target role<input data-focus="role-input" value={meta.role} onChange={(event) => setMeta({ ...meta, role: event.target.value })} placeholder="Role title" required /></label></div>
       <SourceBlock icon={<Target size={22} />} title="The opportunity" tour="job" required note="Job posting, application questions, or role brief">
-        <textarea value={jobText} onChange={(event) => setJobText(event.target.value)} placeholder="Paste the job description or application questions." />
+        <textarea data-focus="job-input" value={jobText} onChange={(event) => setJobText(event.target.value)} placeholder="Paste the job description or application questions." />
         <div className="link-row"><input type="url" value={jobUrl} onChange={(event) => setJobUrl(event.target.value)} placeholder="https://company.com/job" aria-label="Public job link" /><button type="button" className="secondary compact" disabled={!jobUrl.trim() || busy} onClick={readJobLink}><Link size={16} /> Read link</button></div>
         <label className="upload-control"><Paperclip size={17} /> Upload job or application file<input type="file" accept={acceptedFiles} onChange={(event) => addFile(event.target.files[0], "job")} /></label>
       </SourceBlock>
       {sources.length > 0 && <div className="source-stack"><div className="source-stack-head"><strong>Source stack</strong><span>These will be analyzed together.</span></div>{sources.map((source) => <SourceRow key={source.id} source={source} remove={() => removeSource(source.id)} />)}</div>}
       <button type="button" className="add-source" data-tour="more" onClick={openSource}><Plus size={19} /> Add presentations, current responsibilities, company research, CEO context, goals, or another document</button>
       {aiEnabled ? <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span><strong>Research the company with AI</strong><small>Your resume, job details, and added source text will be sent to {aiProvider === "anthropic" ? "Anthropic (Claude)" : "OpenAI"} for analysis. Public findings will include clickable sources.</small></span></label> : <p className="form-hint">AI research is not connected yet. This version analyzes the material you provide and shows its limits.</p>}
-      <button className="primary wide" data-tour="go" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
+      <button className="primary wide" data-tour="go" data-focus="analyze-button" disabled={!canBegin || busy} type="submit">Analyze the full picture <ArrowRight size={19} /></button>
       {!canBegin && <p className="form-hint">Add a resume, target role, and job description or job file to begin.</p>}
       <p className="form-hint">This browser saves your draft on this device. <button type="button" className="text-action" onClick={clear}>Clear saved draft</button></p>
     </form>
@@ -803,22 +1025,25 @@ function AnalysisReady({ analysis, sources, open }) {
     ["Created the interview plan", `${analysis.questions.length} questions, ordered by value`],
     ["Generated an early resume", "Editable now · no need to finish the interview"],
   ];
-  return <main className="analysis-page"><span className="eyebrow">The homework comes first</span><h1>Your starting point is ready.</h1><p>I read the documents together, built a first hiring case, and identified the questions most likely to improve it.</p><div className="analysis-grid">{steps.map(([title, detail], index) => <div className="analysis-step" key={title}><span>{index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div><CheckCircle size={22} weight="fill" /></div>)}</div><div className="analysis-summary"><Target size={29} /><div><small>Working thesis</small><strong>{analysis.thesis}</strong></div></div><button className="primary" onClick={open}>Open my hiring case <ArrowRight size={19} /></button><p className="quiet">{analysis.researchMode === "ai" ? "AI research is active. Review public source links and confirm personal career claims before use." : "This starting point uses the supplied material. AI web research is available when connected and selected."}</p></main>;
+  return <main className="analysis-page"><span className="eyebrow">The homework comes first</span><h1>Your starting point is ready.</h1><p>I read the documents together, built a first hiring case, and identified the questions most likely to improve it.</p><div className="analysis-grid">{steps.map(([title, detail], index) => <div className="analysis-step" key={title}><span>{index + 1}</span><div><strong>{title}</strong><small>{detail}</small></div><CheckCircle size={22} weight="fill" /></div>)}</div><div className="analysis-summary"><Target size={29} /><div><small>Working thesis</small><strong>{analysis.thesis}</strong></div></div><button className="primary" data-focus="open-case-button" onClick={open}>Open my hiring case <ArrowRight size={19} /></button><p className="quiet">{analysis.researchMode === "ai" ? "AI research is active. Review public source links and confirm personal career claims before use." : "This starting point uses the supplied material. AI web research is available when connected and selected."}</p></main>;
 }
 
 function HiringCase({ analysis, coverage, questions, sources, start, research, researching }) {
-  return <><span className="status"><CheckCircle size={17} /> Working resume and question plan ready</span><h1>A hiring case built<br/>from the whole picture.</h1><p className="lead">{analysis.thesis}</p><div className="fit-card"><Target size={30} /><div><small>Strongest apparent fit</small><strong>{analysis.strongestFit}</strong></div></div><EvidenceColumns analysis={analysis} coverage={coverage} /><div className="case-section"><h3>What I would test before strengthening the claim</h3><p>{analysis.caution}</p><button className="text-action" onClick={research}>See every source and inference <ArrowRight size={16} /></button></div><div className="case-section"><div className="section-title"><div><h3>{questions.length} questions—not an endless interview</h3><p>Ordered by how much each answer can change the resume or hiring case.</p></div><span className="count-pill">{sources.length} sources</span></div><ol className="question-preview">{questions.slice(0, 4).map((question, index) => <li key={question.id}><span>{index + 1}</span><div><strong>{question.topic}</strong><small>{question.priority}</small></div></li>)}{questions.length > 4 && <li className="more"><span>+</span><div><strong>{questions.length - 4} more purposeful questions</strong><small>Finish anytime</small></div></li>}</ol></div><button className="primary" disabled={researching} onClick={start}>{researching ? "Researching the company… questions arrive in about a minute" : <>Start with the highest-value question <ArrowRight size={19} /></>}</button></>;
+  return <><span className="status"><CheckCircle size={17} /> Working resume and question plan ready</span><h1>A hiring case built<br/>from the whole picture.</h1><p className="lead">{analysis.thesis}</p><div className="fit-card"><Target size={30} /><div><small>Strongest apparent fit</small><strong>{analysis.strongestFit}</strong></div></div><EvidenceColumns analysis={analysis} coverage={coverage} /><div className="case-section"><h3>What I would test before strengthening the claim</h3><p>{analysis.caution}</p><button className="text-action" onClick={research}>See every source and inference <ArrowRight size={16} /></button></div><button className="primary" disabled={researching} onClick={start}>{researching ? "Researching the company… questions arrive in about a minute" : <>Start with the highest-value question <ArrowRight size={19} /></>}</button></>;
 }
 
 function Research({ analysis, sources, inspect, add }) {
   return <><span className="eyebrow">Research with receipts</span><h1>What the sources say.<br/>What it changes.</h1><p className="lead">Resume evidence, role requirements, company direction, leadership context, and uncertainty stay visibly separate.</p><div className="research-stats"><div><strong>{sources.length}</strong><span>supplied sources</span></div><div><strong>{analysis.requirements.length}</strong><span>role priorities</span></div><div><strong>{analysis.gaps.length}</strong><span>open questions</span></div></div><section className="source-library"><div className="section-title"><div><h3>Source library</h3><p>Open any item to see the extracted text.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add source</button></div>{sources.map((source) => <button className="source-button" key={source.id} onClick={() => inspect(source)}><span className="source-type">{sourceLabels[source.kind]}</span><strong>{source.name}</strong><small>{source.origin}</small><ArrowSquareOut size={16} /></button>)}</section><div className="research-list">{analysis.research.map((item) => <article key={item.id}><span className="eyebrow">{item.label} · {item.origin}</span><h3>{item.title}</h3><p>{item.finding}</p><div className="implication"><strong>What this changes</strong><p>{item.implication}</p></div>{item.url ? <a className="text-action" href={item.url} target="_blank" rel="noreferrer">Read public source <ArrowSquareOut size={16} /></a> : <button className="text-action" onClick={() => inspect(sources.find((source) => source.id === item.id))}>View extracted evidence <ArrowSquareOut size={16} /></button>}</article>)}</div></>;
 }
 
-function Interview({ questions, index, status, answer, setAnswer, review, skip, help, setHelp, sample, add, finish, busy }) {
+function Interview({ questions, index, status, skip, help, setHelp, add, finish, busy }) {
   const q = questions[index];
   const answered = Object.values(status).filter((value) => value === "answered").length;
   if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p><button className="primary" onClick={finish}>Finish my resume now <ArrowRight size={18} /></button></>;
-  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><div className="progress-track"><span style={{ width: `${Math.max(5, (answered / questions.length) * 100)}%` }} /></div><div className="interview-layout"><aside className="question-plan"><span className="eyebrow">YOUR QUESTION PLAN</span>{questions.map((item, itemIndex) => <button key={item.id} className={itemIndex === index ? "current" : ""} disabled={itemIndex > index || status[item.id] === "answered"}><span>{status[item.id] === "answered" ? <Check size={13} /> : itemIndex + 1}</span><div><strong>{item.topic}</strong><small>{status[item.id] || item.priority}</small></div></button>)}</aside><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><h2>{q.prompt}</h2><details><summary>Why this can change your case</summary><p>{q.why}</p></details><label>Your answer<textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Tell me what you remember. Rough notes are perfect." /></label>{q.sample && <button className="text-action sample-answer" onClick={sample}>Use a fictional sample answer</button>}<div className="question-actions"><button className="text-action" onClick={() => setHelp(!help)}>I don’t know yet</button><button className="text-action" onClick={skip}>Skip for now</button><button className="primary" disabled={!answer.trim() || Boolean(busy)} onClick={review}>Review resume update <ArrowRight size={18} /></button></div>{busy && <div className="thinking-inline" role="status"><LeafDrop size={19} /><span><strong>{busy}</strong></span></div>}{help && <div className="help-panel"><h3>Let’s make it easier.</h3><p>{q.tip}</p><div className="search-task"><MagnifyingGlass size={20} /><div><strong>Evidence search worth your time</strong><p>Search permitted email, documents, or notes for the project name plus “launch,” “results,” “approved,” or “team.” Add an excerpt only if you are allowed to share it.</p></div></div><button className="text-action" onClick={add}><Plus size={16} /> Add what I find</button></div>}</section></div></>;
+  // One question, nothing else competing for attention. The answer goes in
+  // the concierge dock below (the focus ring points at it); the question
+  // card keeps the question, why it matters, and the hint.
+  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><h2>{q.prompt}</h2><details><summary>Why this can change your case</summary><p>{q.why}</p></details><p className="quiet">Answer below, in the Career Chief box. Rough notes are perfect.</p><div className="question-actions"><button className="text-action" onClick={() => setHelp(!help)}>I don’t know yet</button><button className="text-action" onClick={skip}>Skip for now</button></div>{busy && <div className="thinking-inline" role="status"><LeafDrop size={19} /><span><strong>{busy}</strong></span></div>}{help && <div className="help-panel"><h3>Let’s make it easier.</h3><p>{q.tip}</p><div className="search-task"><MagnifyingGlass size={20} /><div><strong>Evidence search worth your time</strong><p>Search permitted email, documents, or notes for the project name plus “launch,” “results,” “approved,” or “team.” Add an excerpt only if you are allowed to share it.</p></div></div><button className="text-action" onClick={add}><Plus size={16} /> Add what I find</button></div>}</section></>;
 }
 
 function CareerEvidence({ sources, answers, inspect, add, clear }) {
@@ -837,8 +1062,8 @@ function Proposal({ doc, question, answer, proposal, setProposal, apply, manual,
   // "nothing lands until you approve" rule — only the context differs (a
   // freeform message instead of an interview question, and the exact line
   // being replaced instead of an append target).
-  if (chat && chatProposal) return <><span className="badge">Based on your message · Chat</span><h2>Review the change before it lands.</h2><p>Your message becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR MESSAGE</span><p className="answer-quote">{answer}</p>{chatProposal.target?.kind === "new" ? <><span className="eyebrow">NEW LINE FROM YOUR ANSWERS</span><p className="quiet">This becomes a new line from your answers — your words, not a verified fact.</p></> : <><span className="eyebrow">{(chatProposal.target?.label || "Current wording").toUpperCase()}</span><ul className="old-copy">{[chatProposal.original].map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label>{chatProposal.unsupportedNumbers?.length > 0 && <div className="caution">This wording contains figures not found in your material: {chatProposal.unsupportedNumbers.join(", ")}. Confirm or remove them before approving.</div>}<ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">{chatProposal.note}</p><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><div className="proposal-actions"><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button>{onReject && <button className="secondary" onClick={onReject}>Reject — don’t change anything</button>}</div></>;
-  return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">NEWEST ROLE · THIS WORDING IS ADDED TO ITS BULLETS</span><ul className="prewrap quiet">{((doc.roles || [])[0]?.bullets || []).map((bullet, index) => <li key={index}>{bullet}</li>)}</ul></> : <><span className="eyebrow">NEW LINES FROM YOUR ANSWERS</span><ul className="old-copy">{(doc.highlights || []).map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
+  if (chat && chatProposal) return <><span className="badge">Based on your message · Concierge</span><h2>Review the change before it lands.</h2><p>Your message becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR MESSAGE</span><p className="answer-quote">{answer}</p>{chatProposal.target?.kind === "new" ? <><span className="eyebrow">NEW LINE FROM YOUR ANSWERS</span><p className="quiet">This becomes a new line from your answers — your words, not a verified fact.</p></> : <><span className="eyebrow">{(chatProposal.target?.label || "Current wording").toUpperCase()}</span><ul className="old-copy">{[chatProposal.original].map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label>{chatProposal.unsupportedNumbers?.length > 0 && <div className="caution">This wording contains figures not found in your material: {chatProposal.unsupportedNumbers.join(", ")}. Confirm or remove them before approving.</div>}<ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">{chatProposal.note}</p><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><div className="proposal-actions"><button className="primary" data-focus="approve-button" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button>{onReject && <button className="secondary" onClick={onReject}>Reject — don’t change anything</button>}</div></>;
+  return <><span className="badge">Based on your answer · {question.topic}</span><h2>Review the change before it lands.</h2><p>Your answer becomes career evidence. Only the approved wording enters the resume.</p>{manual && <div className="caution">You have edited this resume manually. Nothing will overwrite that wording without this approval.</div>}<span className="eyebrow">YOUR ANSWER</span><p className="answer-quote">{answer}</p>{question.section === "current" ? <><span className="eyebrow">NEWEST ROLE · THIS WORDING IS ADDED TO ITS BULLETS</span><ul className="prewrap quiet">{((doc.roles || [])[0]?.bullets || []).map((bullet, index) => <li key={index}>{bullet}</li>)}</ul></> : <><span className="eyebrow">NEW LINES FROM YOUR ANSWERS</span><ul className="old-copy">{(doc.highlights || []).map((line, index) => <li key={index}>{line}</li>)}</ul></>}<label>Proposed wording<textarea value={proposal} onChange={(event) => setProposal(event.target.value)} /></label><ProposalWhy answer={answer} proposal={proposal} requirements={requirements} supports={supports} canRevise={canRevise} revise={revise} /><p className="quiet">It’s your resume. Rewrite this however you like; nothing lands until you approve it.</p><button className="primary" data-focus="approve-button" disabled={!proposal.trim()} onClick={apply}>Approve and continue <CheckCircle size={18} /></button></>; }
 
 function ResumeEditor({ doc, save }) {
   const [name, setName] = useState(doc.name || "");
@@ -873,7 +1098,7 @@ function ResumeEditor({ doc, save }) {
     <button className="primary" onClick={saveAll}>Save my wording <Check size={18} /></button></>;
 }
 
-function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, tailor, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} /><div className="tailor-offer"><button className="secondary wide" onClick={tailor}>Tailor this resume to the job</button><small>{analysis?.researchMode === "ai" ? "Reorders and lightly rewords what you already wrote so the most relevant lines come first. You approve each part." : "Moves the lines this job talks about to the top. Nothing is added or reworded. You approve it first."}</small></div>{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
+function Finish({ doc, completed, total, analysis, answers, download, edit, ledger, openLedger, tailor, pro, openPro }) { return <><span className="status"><CheckCircle size={18} /> Ready to use as a working draft</span><h2>Finish now means finish now.</h2><p>You answered {completed} of {total} questions. Unanswered questions remain visible gaps; they do not block the resume.</p><div className="finish-summary"><div><strong>{analysis.sourceCount}</strong><span>sources used</span></div><div><strong>{completed}</strong><span>answers added</span></div><div><strong>{analysis.gaps.length}</strong><span>open themes</span></div></div><div className="caution"><strong>Review before submitting</strong><p>{analysis.caution} No unsupported metric has been added automatically.</p></div>{ledger?.attention.length > 0 && <div className="finish-ledger"><strong>{ledger.attention.length} line{ledger.attention.length === 1 ? "" : "s"} worth a second look before you send this</strong><ul>{ledger.attention.slice(0, 4).map((item) => <li key={item.id}>“{item.line.slice(0, 90)}{item.line.length > 90 ? "…" : ""}” {item.unsupportedNumbers.length ? `· figures not found in your material: ${item.unsupportedNumbers.join(", ")}` : `· ${item.note}`}</li>)}</ul><button className="text-action" onClick={openLedger}>See where every line came from</button></div>}<ParseCheck doc={doc} /><div className="tailor-offer"><button className="secondary wide" onClick={tailor}>Tailor this resume to the job</button><small>{analysis?.researchMode === "ai" ? "Reorders and lightly rewords what you already wrote so the most relevant lines come first. You approve each part." : "Moves the lines this job talks about to the top. Nothing is added or reworded. You approve it first."}</small></div>{pro !== "pro" && <p className="pro-exports-note">Finished file exports are <strong>Pro</strong> — the interview and on-screen preview stay free. <button type="button" className="text-action" onClick={openPro}>Go Pro</button></p>}<div className="export-grid"><button className="primary" data-focus="export-word" onClick={() => download("docx")}><FileDoc size={19} /> Word</button><button className="primary" onClick={() => download("pdf")}><FilePdf size={19} /> PDF</button><button className="secondary" onClick={() => download("html")}><FileHtml size={19} /> HTML</button><button className="secondary" onClick={() => download("txt")}><DownloadSimple size={19} /> Plain text</button></div><button className="text-action" onClick={edit}>Review and edit the full resume first</button><details><summary>Hiring case and interview preparation</summary><p><strong>Core narrative:</strong> {analysis.thesis}</p><p><strong>Reasons to interview you:</strong> {analysis.known?.slice(0, 5).join(" · ") || "Confirm the most relevant strengths."}</p><p><strong>Likely concern:</strong> {analysis.caution}</p>{answers?.length > 0 && <><h3>Interview stories to develop</h3>{answers.map((item) => <p key={item.id}><strong>{item.topic}:</strong> {item.text}</p>)}</>}</details>{analysis.applicationDrafts?.length > 0 && <details><summary>Draft answers to the actual application questions</summary>{analysis.applicationDrafts.map((item, index) => <div key={index} className="application-draft"><strong>{item.question}</strong><p>{item.draft}</p>{item.needsConfirmation && <small>Check before using: {item.needsConfirmation}</small>}</div>)}</details>}<p className="quiet">These exports create new files from the approved draft. Exact original-document formatting is not preserved in this prototype.</p></>; }
 
 // The AI tailor endpoint still speaks the old flat shape (header + bullet
 // lines for the newest role); normalize it to the structured roles model so

@@ -158,9 +158,14 @@ test("findChatTarget matches by keywords, not position alone", () => {
 
 const appSrc = fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
 
-test("App has a Chat tab alongside the existing workspace tabs", () => {
-  assert.match(appSrc, /\['chat','Chat'\]/);
-  assert.match(appSrc, /tab === "chat" && <ChatTab/);
+test("App has a persistent concierge dock instead of a Chat tab", () => {
+  // The tab is gone: the concierge IS the chat, pinned to the bottom of every
+  // screen. No tab entry, no ChatTab render.
+  assert.doesNotMatch(appSrc, /\['chat','Chat'\]/);
+  assert.doesNotMatch(appSrc, /tab === "chat" && <ChatTab/);
+  assert.match(appSrc, /<ConciergeDock/);
+  assert.match(appSrc, /from "\.\/components\/Concierge"/);
+  assert.match(appSrc, /import "\.\/components\/concierge\.css"/);
 });
 
 test("chat proposals reuse the interview approval modal, not a second system", () => {
@@ -173,13 +178,14 @@ test("chat proposals reuse the interview approval modal, not a second system", (
   assert.match(appSrc, /onCancel=\{closeDialog\}/);
 });
 
-test("chat never writes the doc except through the Approve path", () => {
-  // The only doc-writing call for chat proposals is inside applyChatProposal.
+test("concierge never writes the doc except through the Approve path", () => {
+  // The only doc-writing call for concierge proposals is inside applyChatProposal.
   const applyBody = appSrc.slice(appSrc.indexOf("function applyChatProposal()"), appSrc.indexOf("function rejectChatProposal()"));
   assert.match(applyBody, /applyChatProposalToDoc/);
   assert.match(applyBody, /setDoc/);
-  // sendChat drafts and opens the modal; it must not call setDoc.
-  const sendBody = appSrc.slice(appSrc.indexOf("async function sendChat()"), appSrc.indexOf("function applyChatProposal()"));
+  // sendConcierge drafts and opens the modal; it must not call setDoc.
+  const sendBody = appSrc.slice(appSrc.indexOf("async function sendConcierge()"), appSrc.indexOf("function applyChatProposal()"));
+  assert.ok(sendBody.length > 0, "sendConcierge not found");
   assert.doesNotMatch(sendBody, /setDoc/);
 });
 
@@ -189,17 +195,20 @@ test("chat messages and consent are never persisted (Rule 8 + session-only chat)
   assert.doesNotMatch(save[0], /aiConsent|chatMessages|chatProposal/);
 });
 
-test("AI-off chat shows a clear message with a one-click turn-on", () => {
-  assert.match(appSrc, /onEnableAi=\{\(\) => setAiConsent\(true\)\}/);
-  const chatSrc = fs.readFileSync(new URL("../src/components/Chat.jsx", import.meta.url), "utf8");
-  assert.match(chatSrc, /CHAT_AI_OFF_MESSAGE/);
-  assert.match(chatSrc, /Turn AI on/);
-  assert.match(chatSrc, /disabled=\{!aiConsent/);
+test("AI-off concierge shows a clear message with a one-click turn-on", () => {
+  // The dock carries the AI toggle bound to the same session consent state;
+  // the local brain explains AI is off instead of faking understanding.
+  assert.match(appSrc, /<ConciergeDock/);
+  assert.match(appSrc, /aiConsent=\{aiConsent\}/);
+  assert.match(appSrc, /onToggleAi=\{setAiConsent\}/);
+  const brainSrc = fs.readFileSync(new URL("../src/lib/concierge.js", import.meta.url), "utf8");
+  assert.match(brainSrc, /CONCIERGE_AI_OFF_MESSAGE/);
+  assert.match(brainSrc, /Turn AI on/);
 });
 
-test("chat approval records the request as user evidence for the ledger", () => {
+test("concierge approval records the request as user evidence for the ledger", () => {
   const applyBody = appSrc.slice(appSrc.indexOf("function applyChatProposal()"), appSrc.indexOf("function rejectChatProposal()"));
   assert.match(applyBody, /setCareerBank/);
   assert.match(applyBody, /setAnswers/);
-  assert.match(applyBody, /origin: "Chat"/);
+  assert.match(applyBody, /origin: "Concierge"/);
 });

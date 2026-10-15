@@ -312,7 +312,88 @@ async function tailor(payload, auth, fetchImpl, maxBytes) {
   return { summary: kept || null, currentLines: [...(payload.header ? [payload.header] : []), ...bullets], skills, why: [...(Array.isArray(data.why) ? data.why : []).slice(0, 4).map((item) => String(item).slice(0, 220)), ...notes] };
 }
 
+// "Talk to my Career Chief": the concierge in a live conversation. The client
+// only sends freeform messages here — interview answers, edit commands with a
+// local draft, and deterministic commands (finish, skip, sources…) never reach
+// this route. The model answers from the supplied context only, and any action
+// it proposes is re-validated below against that same context before the
+// client is allowed to act on it: a proposal must be faithful to the user's
+// words and the doc, a challenge must name an exact doc line, and an "ask"
+// must name a queued question id. Anything that fails validation degrades to
+// a plain reply — the client falls back to its local brain.
+async function concierge(payload, auth, fetchImpl, maxBytes) {
+  const docText = [
+    payload.doc?.summary || "",
+    ...(payload.doc?.roles || []).flatMap((role) => [role.title, role.company, ...(role.bullets || [])]),
+    ...(payload.doc?.highlights || []),
+    ...(payload.doc?.skills || []),
+  ].join("\n");
+  const supports = [payload.message, docText, ...(payload.answers || [])].filter(Boolean).map(String);
+  const { data } = await ask(auth, {
+    model: MODELS.drafting, store: false,
+    instructions: `${instructions} You are the Career Chief concierge in a live conversation with the candidate. Be brief: at most 3 short sentences, plain words, no markdown, no bullet lists, no headings. Ask at most ONE question. The candidate owns their resume and decides what it says. Never invent metrics, dates, team sizes, titles, results, or facts — use only the supplied context. If you do not know, say so and name the one question that would settle it. If the candidate asks for a change to the resume, return action propose with exactly ONE replacement or new line built only from their words and the doc; never add a figure. If they ask you to challenge or review the draft, return action challenge with ONE exact line from the doc and a short reason. If they ask where to find proof, return action search with an exact query and what to look for. If they ask to see sources, comparisons, career evidence, or to finish, return action stage with that view. If a question is still pending, end your reply by restating it briefly. Output JSON only.`,
+    input: `Output JSON keys reply (string) and action (object with type: "none", "ask", "propose", "challenge", "search" or "stage"). For ask: { type, questionId } naming one queued question. For propose: { type, proposed, target: { kind: "new" | "summary" | "bullet" | "highlight" | "skill", roleIndex, bulletIndex, index } }. For challenge: { type, line, reason }. For search: { type, query, lookingFor }. For stage: { type, view: "case" | "research" | "compare" | "career" | "finish" }.\n${JSON.stringify({ role: payload.role, company: payload.company, stage: payload.stage, currentQuestion: payload.currentQuestion || null, doc: payload.doc, known: payload.known, gaps: payload.gaps, requirements: payload.requirements, questions: payload.questions, answers: payload.answers, messages: payload.messages, message: payload.message })}`,
+    text: { format: { type: "json_object" } },
+  }, fetchImpl, maxBytes);
+  const reply = String(data.reply || "").trim().slice(0, 1200) || "I can take edit requests, walk you through the next step, or open your sources, comparisons, or finish screen.";
+  const none = { reply, action: { type: "none" } };
+  const action = data.action;
+  if (!action || typeof action !== "object" || typeof action.type !== "string") return none;
+  if (action.type === "ask") {
+    const match = (payload.questions || []).find((q) => q.id === action.questionId);
+    return match ? { reply, action: { type: "ask", questionId: match.id } } : none;
+  }
+  if (action.type === "propose") {
+    const proposed = faithful(cleanLine(action.proposed), supports);
+    if (!proposed) return none;
+    const target = action.target && typeof action.target === "object" ? action.target : { kind: "new" };
+    const okTarget =
+      target.kind === "new" ||
+      (target.kind === "summary" && Boolean(payload.doc?.summary)) ||
+      (target.kind === "bullet" && Number.isInteger(target.roleIndex) && Number.isInteger(target.bulletIndex) && payload.doc?.roles?.[target.roleIndex]?.bullets?.[target.bulletIndex] !== undefined) ||
+      (target.kind === "highlight" && Number.isInteger(target.index) && payload.doc?.highlights?.[target.index] !== undefined) ||
+      (target.kind === "skill" && Number.isInteger(target.index) && payload.doc?.skills?.[target.index] !== undefined);
+    if (!okTarget) return none;
+    const original =
+      target.kind === "summary" ? payload.doc.summary :
+      target.kind === "bullet" ? payload.doc.roles[target.roleIndex].bullets[target.bulletIndex] :
+      target.kind === "highlight" ? payload.doc.highlights[target.index] :
+      target.kind === "skill" ? payload.doc.skills[target.index] : "";
+    return {
+      reply,
+      action: {
+        type: "propose",
+        proposed,
+        target: { kind: target.kind, ...(Number.isInteger(target.roleIndex) ? { roleIndex: target.roleIndex } : {}), ...(Number.isInteger(target.bulletIndex) ? { bulletIndex: target.bulletIndex } : {}), ...(Number.isInteger(target.index) ? { index: target.index } : {}) },
+        original,
+        unsupportedNumbers: unsupportedNumbers(proposed, supports),
+      },
+    };
+  }
+  if (action.type === "challenge") {
+    const lines = [payload.doc?.summary, ...(payload.doc?.roles || []).flatMap((role) => role.bullets || []), ...(payload.doc?.highlights || []), ...(payload.doc?.skills || [])].filter(Boolean);
+    if (typeof action.line !== "string" || !lines.includes(action.line.trim())) return none;
+    return { reply, action: { type: "challenge", line: action.line.trim(), reason: String(action.reason || "").slice(0, 240) } };
+  }
+  if (action.type === "search") {
+    if (typeof action.query !== "string" || !action.query.trim() || typeof action.lookingFor !== "string" || !action.lookingFor.trim()) return none;
+    return { reply, action: { type: "search", query: action.query.trim().slice(0, 200), lookingFor: action.lookingFor.trim().slice(0, 300) } };
+  }
+  if (action.type === "stage") {
+    if (!["case", "research", "compare", "career", "finish"].includes(action.view)) return none;
+    return { reply, action: { type: "stage", view: action.view } };
+  }
+  return none;
+}
 const priorOk = (value) => value === undefined || (Array.isArray(value) && value.every((item) => isText(item) || (isObject(item) && (item.text === undefined || isText(item.text)))));
+const stringList = (value, max = 12) => value === undefined || (Array.isArray(value) && value.length <= max && value.every(isText));
+const conciergeOk = (p) => common(p) && isText(p.stage) && isText(p.message) && p.message.trim() &&
+  (p.doc === undefined || (isObject(p.doc) && [p.doc.summary].every((v) => v === undefined || isText(v)) &&
+    [p.doc.roles, p.doc.highlights, p.doc.skills].every((v) => v === undefined || Array.isArray(v)))) &&
+  stringList(p.known) && stringList(p.gaps) && stringList(p.requirements) && stringList(p.answers, 10) &&
+  (p.messages === undefined || (Array.isArray(p.messages) && p.messages.length <= 10 && p.messages.every((m) => isObject(m) && ["user", "assistant"].includes(m.role) && isText(m.text)))) &&
+  (p.questions === undefined || (Array.isArray(p.questions) && p.questions.length <= 12 && p.questions.every((q) => isObject(q) && isText(q.id) && isText(q.topic) && isText(q.prompt)))) &&
+  (p.currentQuestion === undefined || p.currentQuestion === null || (isObject(p.currentQuestion) && isText(p.currentQuestion.prompt)));
 const common = (p) => isObject(p) && (p.role === undefined || isText(p.role)) && priorOk(p.priorAnswers) && JSON.stringify(p).length <= MAX_INPUT;
 const followUpOk = (p) => common(p) && isText(p.answer) && p.answer.trim() && isObject(p.question) && isText(p.question.prompt) && p.question.prompt && [p.askedTopics, p.pendingTopics].every((v) => v === undefined || isTextList(v));
 const tailorOk = (p) => common(p) && isText(p.role) && isText(p.skills) && isTextList(p.bullets) && p.bullets.length > 0 && p.bullets.length <= 30 && [p.summary, p.header, p.company].every((v) => v === undefined || isText(v)) && [p.answers, p.priorities].every((v) => v === undefined || isTextList(v));
@@ -323,6 +404,7 @@ const routes = {
   "/api/ai/follow-up": { validate: (payload) => { if (!followUpOk(payload)) throw new Error(BAD); }, run: followUp },
   "/api/ai/tailor": { validate: (payload) => { if (!tailorOk(payload)) throw new Error(BAD); }, run: tailor },
   "/api/ai/revise": { validate: (payload) => { if (!reviseOk(payload)) throw new Error(BAD); }, run: revise },
+  "/api/ai/concierge": { validate: (payload) => { if (!conciergeOk(payload)) throw new Error(BAD); }, run: concierge },
 };
 
 // Point either provider at a gateway, proxy or local fake by setting OPENAI_BASE_URL

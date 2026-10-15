@@ -346,3 +346,88 @@ test("tailor: a first answer that drops a line is retried once", async () => {
   assert.equal(response.status, 200);
   assert.equal(calls, 2);
 });
+
+// ── Concierge ───────────────────────────────────────────────────────────────
+
+const conciergeBody = {
+  role: "Marketing Director",
+  company: "Example Co",
+  stage: "interview",
+  currentQuestion: { id: "q1", topic: "Outcomes", prompt: "What changed?" },
+  doc: {
+    summary: "Brand marketing leader.",
+    roles: [{ title: "Manager", company: "Example Co", bullets: ["Led editorial team."] }],
+    highlights: [],
+    skills: ["Leadership"],
+  },
+  known: ["Editorial leadership"],
+  gaps: ["Measurable growth"],
+  requirements: ["Editorial leadership"],
+  questions: [{ id: "q1", topic: "Outcomes", prompt: "What changed?" }],
+  answers: ["I led the editorial team."],
+  messages: [{ role: "user", text: "What is my strongest fit?" }],
+  message: "What is my strongest fit?",
+};
+const conciergeWith = (modelJson, body = conciergeBody) =>
+  handleCareerAI(req("/api/ai/concierge", body), claudeOn(), async () => claudeResponse(JSON.stringify(modelJson)));
+
+test("concierge: a plain question gets a reply and no action", async () => {
+  const response = await conciergeWith({ reply: "Your strongest fit is editorial leadership.", action: { type: "none" } });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.match(result.reply, /editorial leadership/);
+  assert.equal(result.action.type, "none");
+});
+
+test("concierge: ask must name a queued question id", async () => {
+  const good = await conciergeWith({ reply: "One question.", action: { type: "ask", questionId: "q1" } });
+  assert.equal((await good.json()).action.questionId, "q1");
+  const bad = await conciergeWith({ reply: "One question.", action: { type: "ask", questionId: "nope" } });
+  assert.equal((await bad.json()).action.type, "none");
+});
+
+test("concierge: a faithful proposal passes; an invented one degrades to no action", async () => {
+  const faithful = await conciergeWith({
+    reply: "Here is a stronger line.",
+    action: { type: "propose", proposed: "Led the editorial team, emphasizing creator programs.", target: { kind: "bullet", roleIndex: 0, bulletIndex: 0 } },
+  }, { ...conciergeBody, message: "lean into creator programs" });
+  const faithfulResult = await faithful.json();
+  assert.equal(faithfulResult.action.type, "propose");
+  assert.equal(faithfulResult.action.original, "Led editorial team.");
+  const invented = await conciergeWith({
+    reply: "Here is a stronger line.",
+    action: { type: "propose", proposed: "Built a cross-functional influencer affiliate ambassador program from scratch.", target: { kind: "new" } },
+  });
+  assert.equal((await invented.json()).action.type, "none");
+});
+
+test("concierge: a challenge must name an exact doc line", async () => {
+  const good = await conciergeWith({
+    reply: "This line could be stronger.",
+    action: { type: "challenge", line: "Led editorial team.", reason: "It does not say what changed." },
+  });
+  assert.equal((await good.json()).action.type, "challenge");
+  const bad = await conciergeWith({
+    reply: "This line could be stronger.",
+    action: { type: "challenge", line: "Grew revenue 400%.", reason: "Invented." },
+  });
+  assert.equal((await bad.json()).action.type, "none");
+});
+
+test("concierge: stage and search actions pass through validated", async () => {
+  const staged = await conciergeWith({ reply: "Opening sources.", action: { type: "stage", view: "research" } });
+  assert.equal((await staged.json()).action.view, "research");
+  const badStage = await conciergeWith({ reply: "Opening.", action: { type: "stage", view: "admin" } });
+  assert.equal((await badStage.json()).action.type, "none");
+  const searched = await conciergeWith({ reply: "Search for it.", action: { type: "search", query: "Outcomes", lookingFor: "A supported result." } });
+  assert.equal((await searched.json()).action.query, "Outcomes");
+});
+
+test("concierge: a missing message is a bad payload, never a model call", async () => {
+  let called = false;
+  const fetcher = async () => { called = true; throw new Error("Must not call network"); };
+  const { message, ...noMessage } = conciergeBody;
+  const response = await handleCareerAI(req("/api/ai/concierge", noMessage), claudeOn(), fetcher);
+  assert.equal(response.status, 422);
+  assert.equal(called, false);
+});
