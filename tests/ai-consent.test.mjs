@@ -41,10 +41,16 @@ test("App.jsx never persists aiConsent to the saved draft (Rule 8)", () => {
   assert.doesNotMatch(save[0], /aiConsent/);
 });
 
-test("workspace carries an AI toggle wired to the same consent state", () => {
-  const src = fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
-  assert.match(src, /className="ai-toggle"/);
-  assert.match(src, /checked=\{aiConsent\} onChange=\{\(event\) => setAiConsent\(event\.target\.checked\)\}/);
+test("workspace carries exactly one AI toggle, wired to the same consent state", () => {
+  // The toggle lives ONLY in the concierge dock now — the old second copy
+  // in the workspace opportunity bar showed the same control twice.
+  const dock = fs.readFileSync(new URL("../src/components/Concierge.jsx", import.meta.url), "utf8");
+  assert.match(dock, /className="ai-toggle concierge-ai-toggle"/);
+  assert.match(dock, /checked=\{aiConsent\}/);
+  assert.match(dock, /onToggleAi\(event\.target\.checked\)/);
+  const app = fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.match(app, /onToggleAi=\{setAiConsent\}/);
+  assert.doesNotMatch(app, /className="ai-toggle"/, "App.jsx must not carry a second toggle");
 });
 
 // ── Terms fixes: MD source and served HTML must agree ──────────────────────

@@ -87,7 +87,6 @@ export function App() {
   const [chatProposal, setChatProposal] = useState(null);
   const [tailored, setTailored] = useState(initialDraft?.tailored || false);
   const [justExported, setJustExported] = useState(false);
-  const [help, setHelp] = useState(false);
   const [modal, setModal] = useState(null);
   const [sourceDraft, setSourceDraft] = useState({ ...blankSource });
   const [selectedSource, setSelectedSource] = useState(null);
@@ -423,7 +422,7 @@ export function App() {
   // either moves the view, opens a dialog, or posts a message — none of them
   // touches the doc.
   function handleConciergeAction(action, payload) {
-    if (action === "start-interview" || action === "back-to-question") {
+    if (action === "back-to-question") {
       // Never land on a blank workspace: the interview needs a built case.
       if (!analysis || !doc) { say("The interview opens once your hiring case is built. Add your resume and the job, then press Analyze."); return; }
       setScreen("workspace");
@@ -437,7 +436,9 @@ export function App() {
     if (action === "skip") { skipQuestion(); return; }
     if (action === "help") {
       const q = nextQuestion(questions, questionStatus);
-      if (q) { setScreen("workspace"); setTab("interview"); setHelp(true); say(`Take your time. Under the question I put a hint: ${q.tip}`); }
+      // The hint lives HERE in the dock now — the main pane no longer has
+      // a help panel under the question, so pointing at it would lie.
+      if (q) { setScreen("workspace"); setTab("interview"); say(`Take your time. ${q.tip || "Rough notes are perfect — answer in your own words."} If it helps, search your email, documents, or notes for “${q.topic}”.`, [{ label: "Add what I find", action: "add-source" }]); }
       else say("Nothing pending right now — ask me anything, or finish your resume.");
       return;
     }
@@ -445,7 +446,6 @@ export function App() {
       if (!doc) { say("Finish needs a resume first — add your resume and the job, then I'll build your starting point."); return; }
       setModal("finish"); return;
     }
-    if (action === "undo") { undoResume(); return; }
     if (action === "sources" || action === "compare" || action === "career" || action === "case") {
       if (screen !== "workspace" || !analysis) { say("That opens once your hiring case is built — add your resume and the job first."); return; }
       if (action === "sources") setTab("research");
@@ -572,8 +572,9 @@ export function App() {
     setCareerBank((items) => [...items, { id: uid(), topic: entry.topic, question: chatProposal.request, text: chatProposal.request, origin: "Concierge" }]);
     setChatProposal(null);
     setModal(null);
-    setNotice("Chat change approved and the working resume was updated. Undo is available.");
-    say(`Approved — your resume is updated.`, [{ label: "Undo", action: "undo" }]);
+    // One confirmation, in the dock — the old notice bar said the same thing,
+    // and the resume pane already carries the single Undo button.
+    say(`Approved — your resume is updated.`);
     const next = nextQuestion(questions, questionStatus);
     if (next) { const m = questionMessage(next); say(m.text, m.actions); }
   }
@@ -637,7 +638,7 @@ export function App() {
     setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { roles: result.roles } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
     setTailored(true);
     setModal(null);
-    setNotice("Tailoring applied. Undo is under the working resume if you change your mind.");
+    // One confirmation, in the dock — the old notice bar said the same thing.
     say("Tailoring applied — your resume now leads with what this job asks for.");
   }
 
@@ -677,15 +678,16 @@ export function App() {
     }
     setPendingFollowUp(null);
     setAnswer("");
-    setHelp(false);
     setModal(null);
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
-    setNotice("Answer saved as evidence and the working resume was updated. Undo is available.");
+    // One confirmation, in the dock — the old notice bar said the same thing.
     say("Approved — your answer is now evidence on your resume.");
     const remaining = questions.filter((item) => item.id !== question.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
     const next = remaining[0] || null;
     if (next) { const m = questionMessage(next); say(m.text, m.actions); }
-    else say("That's every question — your resume is ready whenever you are.", [{ label: "Finish my resume now", action: "finish" }]);
+    // No Finish button on this message: Finish lives in the header + the
+    // dock's persistent button. A third copy here was pure repetition.
+    else say("That's every question — your resume is ready whenever you are.");
   }
 
   function skipQuestion() {
@@ -693,11 +695,12 @@ export function App() {
     setQuestionStatus((state) => ({ ...state, [currentQuestion.id]: "skipped" }));
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
     setAnswer("");
-    setHelp(false);
     const remaining = questions.filter((item) => item.id !== currentQuestion.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
     const next = remaining[0] || null;
     if (next) { const m = questionMessage(next); say(m.text, m.actions); }
-    else say("Skipped — it stays out of your resume, and nothing is blocked.", [{ label: "Finish my resume now", action: "finish" }]);
+    // No Finish button on this message: Finish lives in the header + the
+    // dock's persistent button.
+    else say("Skipped — it stays out of your resume, and nothing is blocked.");
   }
 
   function undoResume() {
@@ -872,13 +875,13 @@ export function App() {
     {screen === "workspace" && analysis && doc && <>
       <div className="opportunity-bar">
         <button className="opportunity-name" onClick={() => setModal("opportunity")}><span className="eyebrow">WORKING TOWARD</span><strong>{meta.company || "Target company"} <span>/ {meta.role}</span></strong><CaretDown size={16} /></button>
-        <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span>{aiEnabled && <label className="ai-toggle"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span>AI {aiConsent ? "on" : "off"}</span></label>}<button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
+        <div className="opportunity-actions"><span>{analysis.sourceCount} sources analyzed</span><button className="text-action" onClick={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }}><Plus size={18} /> Add context</button></div>
       </div>
       <div className="workspace">
         <main className="main-pane">
           {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => { setTab("interview"); const q = nextQuestion(questions, questionStatus); if (q) { const m = questionMessage(q); say(m.text, m.actions); } }} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
-          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} skip={skipQuestion} help={help} setHelp={setHelp} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} finish={() => setModal("finish")} busy={busy} />}
+          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
           {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
@@ -1036,14 +1039,15 @@ function Research({ analysis, sources, inspect, add }) {
   return <><span className="eyebrow">Research with receipts</span><h1>What the sources say.<br/>What it changes.</h1><p className="lead">Resume evidence, role requirements, company direction, leadership context, and uncertainty stay visibly separate.</p><div className="research-stats"><div><strong>{sources.length}</strong><span>supplied sources</span></div><div><strong>{analysis.requirements.length}</strong><span>role priorities</span></div><div><strong>{analysis.gaps.length}</strong><span>open questions</span></div></div><section className="source-library"><div className="section-title"><div><h3>Source library</h3><p>Open any item to see the extracted text.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add source</button></div>{sources.map((source) => <button className="source-button" key={source.id} onClick={() => inspect(source)}><span className="source-type">{sourceLabels[source.kind]}</span><strong>{source.name}</strong><small>{source.origin}</small><ArrowSquareOut size={16} /></button>)}</section><div className="research-list">{analysis.research.map((item) => <article key={item.id}><span className="eyebrow">{item.label} · {item.origin}</span><h3>{item.title}</h3><p>{item.finding}</p><div className="implication"><strong>What this changes</strong><p>{item.implication}</p></div>{item.url ? <a className="text-action" href={item.url} target="_blank" rel="noreferrer">Read public source <ArrowSquareOut size={16} /></a> : <button className="text-action" onClick={() => inspect(sources.find((source) => source.id === item.id))}>View extracted evidence <ArrowSquareOut size={16} /></button>}</article>)}</div></>;
 }
 
-function Interview({ questions, index, status, skip, help, setHelp, add, finish, busy }) {
+function Interview({ questions, index, status }) {
   const q = questions[index];
   const answered = Object.values(status).filter((value) => value === "answered").length;
-  if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p><button className="primary" onClick={finish}>Finish my resume now <ArrowRight size={18} /></button></>;
-  // One question, nothing else competing for attention. The answer goes in
-  // the concierge dock below (the focus ring points at it); the question
-  // card keeps the question, why it matters, and the hint.
-  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><h2>{q.prompt}</h2><details><summary>Why this can change your case</summary><p>{q.why}</p></details><p className="quiet">Answer below, in the Career Chief box. Rough notes are perfect.</p><div className="question-actions"><button className="text-action" onClick={() => setHelp(!help)}>I don’t know yet</button><button className="text-action" onClick={skip}>Skip for now</button></div>{busy && <div className="thinking-inline" role="status"><LeafDrop size={19} /><span><strong>{busy}</strong></span></div>}{help && <div className="help-panel"><h3>Let’s make it easier.</h3><p>{q.tip}</p><div className="search-task"><MagnifyingGlass size={20} /><div><strong>Evidence search worth your time</strong><p>Search permitted email, documents, or notes for the project name plus “launch,” “results,” “approved,” or “team.” Add an excerpt only if you are allowed to share it.</p></div></div><button className="text-action" onClick={add}><Plus size={16} /> Add what I find</button></div>}</section></>;
+  if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p></>;
+  // The question itself lives ONLY in the concierge dock below — its prompt,
+  // its Skip / I-don't-know buttons, and the answer box are all there. This
+  // pane shows work context only: progress + why this question matters.
+  // (Finish lives in the header + the dock's persistent button, not here.)
+  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><details><summary>Why this can change your case</summary><p>{q.why}</p></details><p className="quiet">The question is in the Career Chief box below — answer there, in your own words.</p></section></>;
 }
 
 function CareerEvidence({ sources, answers, inspect, add, clear }) {

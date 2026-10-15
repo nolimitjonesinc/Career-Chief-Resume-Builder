@@ -131,15 +131,20 @@ test("next question skips answered and skipped, returns null when done", () => {
   assert.equal(nextQuestion(questions, { q1: "skipped", q2: "answered" }), null);
 });
 
-test("baseline message names the fit, the unknown, and the first question", () => {
+test("baseline message names the fit, the unknown, and the first question topic — never the full prompt", () => {
   const m = baselineMessage(analysis);
   assert.match(m.text, /Brand strategy \+ team leadership/);
   assert.match(m.text, /measurable growth/);
-  assert.match(m.text, /What did you personally build/);
-  assert.deepEqual(m.actions, [{ label: "Start with that question", action: "start-interview" }]);
+  // Topic only: the full prompt lives solely in the question message the
+  // interview posts. Repeating it here put the question on screen twice.
+  assert.match(m.text, /Program ownership/);
+  assert.ok(!m.text.includes("What did you personally build?"));
+  // No "Start with that question" action: the hiring-case button is the
+  // single way to start. A second start control duplicated it.
+  assert.deepEqual(m.actions, []);
 });
 
-test("question message asks one question with help and skip", () => {
+test("question message is the single home of the question, with help and skip", () => {
   const m = questionMessage(questions[0]);
   assert.match(m.text, /What did you personally build/);
   assert.deepEqual(m.actions.map((a) => a.action), ["help", "skip"]);
@@ -171,11 +176,36 @@ test("next step is one plain sentence per stage", () => {
   assert.match(nextStepText({ ...workspace, modal: "proposal" }), /approve or reject/);
 });
 
-test("quick actions: no Finish before there is a resume; Finish once there is", () => {
-  assert.deepEqual(quickActions(base).map((a) => a.action), ["sample"]);
-  assert.ok(quickActions(workspace).some((a) => a.action === "finish"));
-  assert.ok(quickActions(workspace).some((a) => a.action === "skip"));
-  assert.deepEqual(quickActions({ ...base, screen: "analysis", analysis }).map((a) => a.action), ["open-case"]);
+test("quick actions never duplicate what is already on screen", () => {
+  // No Finish chip: Finish lives in the header + the dock's persistent button.
+  // No Skip / I-don't-know chips: the current question card already has them.
+  const interviewActions = quickActions({ ...workspace, view: "interview" }).map((a) => a.action);
+  assert.ok(!interviewActions.includes("finish"), "no Finish chip");
+  assert.ok(!interviewActions.includes("skip"), "no Skip chip duplicating the card");
+  assert.ok(!interviewActions.includes("help"), "no Help chip duplicating the card");
+  assert.deepEqual(interviewActions, ["sources"]);
+  // Off the interview view, the only chip is the way back — still no Skip/Help/Finish.
+  assert.deepEqual(
+    quickActions({ ...workspace, view: "case" }).map((a) => a.action),
+    ["back-to-question"],
+  );
+  // No sample chip: the intake pane already has the sample link.
+  assert.deepEqual(quickActions(base), []);
+  // No open-case chip: the analysis pane already has the Open button.
+  assert.deepEqual(quickActions({ ...base, screen: "analysis", analysis }).map((a) => a.action), []);
+});
+
+test("the question prompt is produced exactly once", () => {
+  // baselineMessage carries the topic, not the prompt; chips carry no prompt.
+  const baseline = baselineMessage(analysis);
+  assert.ok(!baseline.text.includes(questions[0].prompt));
+  for (const state of [{ ...workspace, view: "interview" }, { ...workspace, view: "case" }]) {
+    for (const a of quickActions(state)) {
+      assert.ok(!a.label.includes(questions[0].prompt));
+    }
+  }
+  // Only questionMessage carries the full prompt.
+  assert.ok(questionMessage(questions[0]).text.includes(questions[0].prompt));
 });
 
 // ── Local replies ───────────────────────────────────────────────────────────

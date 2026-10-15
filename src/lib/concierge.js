@@ -201,19 +201,20 @@ export function evidenceSearchFor(question) {
 // ---------------------------------------------------------------------------
 
 export function baselineMessage(analysis = {}) {
-  const first = (analysis.questions || [])[0];
   const unknown = (analysis.gaps || [])[0];
+  const first = (analysis.questions || [])[0];
+  // The full question text lives ONLY in the question message the interview
+  // posts — repeating the prompt here would put it on screen twice, and the
+  // "Start with that question" action would duplicate the hiring-case
+  // button. This message narrates the baseline; the case view starts it.
   const text = [
     `I read everything together. Strongest fit: ${analysis.strongestFit || "your career evidence"}.`,
     unknown ? `Biggest unknown: ${unknown.toLowerCase()}.` : "",
-    first ? `First question: ${first.prompt}` : "",
+    first?.topic ? `Your first question is ready — ${first.topic}.` : "",
   ]
     .filter(Boolean)
     .join(" ");
-  return {
-    text,
-    actions: first ? [{ label: "Start with that question", action: "start-interview" }] : [],
-  };
+  return { text, actions: [] };
 }
 
 export function questionMessage(question) {
@@ -250,21 +251,19 @@ export function nextStepText(state = {}) {
 
 // ---------------------------------------------------------------------------
 // Quick-action chips for the dock, per stage. One obvious action per screen.
-// ---------------------------------------------------------------------------
-
+//
+// Dedup rule: chips NEVER repeat what is already on screen. The current
+// question card already carries Skip / I-don't-know, Finish lives in the
+// header + the dock's persistent button, the main pane already has the
+// sample link and the Open-my-hiring-case button — so none of those appear
+// here. Chips only add navigation the current card doesn't have.
 export function quickActions(state = {}) {
   const stage = conciergeStage(state);
-  if (stage === "intake") return [{ label: "Load the sample", action: "sample" }];
-  if (stage === "briefing") return [{ label: "Open my hiring case", action: "open-case" }];
+  if (stage === "intake") return [];
+  if (stage === "briefing") return [];
   if (stage === "interview") {
-    const actions = [
-      { label: "Skip for now", action: "skip" },
-      { label: "I don't know yet", action: "help" },
-    ];
-    if (state.view !== "interview") actions.unshift({ label: "Back to the question", action: "back-to-question" });
-    else actions.push({ label: "See my sources", action: "sources" });
-    if (state.doc) actions.push({ label: "Finish my resume now", action: "finish" });
-    return actions;
+    if (state.view !== "interview") return [{ label: "Back to the question", action: "back-to-question" }];
+    return [{ label: "See my sources", action: "sources" }];
   }
   if (stage === "finish") {
     return [
