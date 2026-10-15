@@ -17,11 +17,10 @@ Career Chief helps you build and tailor resumes, including with AI-generated dra
 **Pro plans (one-time payments, USD):**
 - 30-Day Pass — $29, Pro for 30 days from purchase
 - 1-Year Pro — $79, Pro for 1 year from purchase
-- Lifetime Pro — $149, Pro forever, for as long as Career Chief is offered (see section 8)
 
-**What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro — lifetime or otherwise.
+**What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro.
 
-Each license key may be activated in up to **3 browsers**. (Chrome and Safari on the same laptop count as two — a "seat" is a browser, not a computer.) Keys are for your personal use — don't share, resell, or publish them. You can free a seat anytime with "Deactivate on this browser" in the Pro dialog; if you lose access to a browser, email support@dannyjones.ai and we'll reset it.
+Each license key may be activated in up to **3 browsers**. (Chrome and Safari on the same laptop count as two — a "seat" is a browser, not a computer.) Keys are for your personal use — don't share, resell, or publish them. Each license is for personal use only — not for preparing resumes for others for pay. You can free a seat anytime with "Deactivate on this browser" in the Pro dialog; if you lose access to a browser, email support@dannyjones.ai and we'll reset it.
 
 ## 2. Your content, and what the AI writes
 
@@ -51,6 +50,7 @@ If you reverse a payment through your bank or card issuer (a chargeback), your l
 
 You agree not to:
 - Share, resell, or distribute license keys, or circumvent license validation;
+- Prepare resumes for others for pay (each license is for personal use only);
 - Use the service for anything unlawful, or to generate deceptive or fraudulent resumes;
 - Abuse the service (scraping, automated bulk use, attempting to disrupt it);
 - Upload content you don't have the right to use.
@@ -59,11 +59,11 @@ We may suspend or revoke a license key for fraud, abuse, or violation of these t
 
 ## 7. Service changes and availability
 
-We may update, change, or discontinue features at any time. "Lifetime" / "forever" means for as long as Career Chief is offered — if the product is ever retired, we'll give Lifetime holders reasonable notice. The service is provided "as is," without warranties of any kind.
+We may update, change, or discontinue features at any time. If the product is ever retired, we'll give active license holders reasonable notice. The service is provided "as is," without warranties of any kind.
 
 ## 8. Limitation of liability
 
-To the maximum extent allowed by law, our total liability for any claim related to the service is limited to **the amount you paid us** (through Lemon Squeezy) in the 12 months before the claim. We are not liable for indirect, incidental, or consequential damages — including lost job opportunities or income.
+To the maximum extent allowed by law, our total liability for any claim related to the service is limited to **the amount you paid for your Pro license** (through Lemon Squeezy). We are not liable for indirect, incidental, or consequential damages — including lost job opportunities or income.
 
 ## 9. Governing law
 

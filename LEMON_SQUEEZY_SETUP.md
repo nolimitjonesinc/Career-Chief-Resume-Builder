@@ -16,7 +16,7 @@ A license-key **Pro** unlock with no accounts (the app has none by design):
   from the purchase email is pasted into the app and activated via the public
   License API (`activate` / `validate` / `deactivate`) — called from the
   browser, no API secret anywhere in the client.
-- Three purchase tiers (30-Day $29 / 1-Year $79 / Lifetime $149), all
+- Two purchase tiers (30-Day $29 / 1-Year $79), both
   one-time payments with license keys (activation limit 3). The Pro dialog
   lists every tier from the `VITE_LS_TIERS` env var; any tier's key activates
   Pro. The old single-variant env vars still work as a one-tier fallback.
@@ -50,7 +50,7 @@ Code map: `shared/lemonsqueezy.mjs` (API + gating logic + tests),
      `https://app.lemonsqueezy.com/checkout/buy/{variant-uuid}`.
 6. **Paste into `.env`** (copy `.env.example` first). The dialog reads its
    tiers from `VITE_LS_TIERS` — a JSON array of
-   `{name, price, variant, url, term}`; see `.env.example` for the three
+   `{name, price, variant, url, term}`; see `.env.example` for the two
    live tiers. The legacy `VITE_LS_VARIANT_ID` / `VITE_LS_CHECKOUT_URL` /
    `VITE_LS_PRICE_LABEL` vars still work as a single-tier fallback:
    ```bash
