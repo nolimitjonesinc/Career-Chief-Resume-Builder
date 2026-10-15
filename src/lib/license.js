@@ -220,3 +220,91 @@ export function maskLicenseKey(key) {
   if (clean.length <= 4) return "••••";
   return `••••${clean.slice(-4)}`;
 }
+
+// ── Daily export limit ──────────────────────────────────────────────────────
+// Cap: 10 finished-file exports per license key per calendar day (the user's
+// local day). Counts live in localStorage next to the license record, keyed
+// by license key so two keys in one browser get separate counts.
+//
+// HONEST LIMIT: this is client-side friction, not a wall. A determined abuser
+// could clear browser storage and keep going — real server-side enforcement
+// would need a backend this app doesn't have. It stops casual key-sharing and
+// makes running a resume shop on one key impractical, which is the goal.
+// The count is deliberately NOT cleared when a license is deactivated, so
+// deactivating and re-activating the same key the same day can't reset it.
+// If storage is unavailable the check fails open (allows the export) so a
+// paying user in a blocked-storage browser is never locked out by the cap.
+
+export const DAILY_EXPORT_LIMIT = 10;
+export const EXPORT_LIMIT_MESSAGE =
+  "Daily export limit reached — you've used your 10 exports for today. Your draft is safe; come back tomorrow to export again.";
+const EXPORT_COUNT_KEY = "career-chief-export-count-v1";
+
+function exportDayKey(date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function normalizeExportNow(now) {
+  if (now instanceof Date) return now;
+  if (typeof now === "number") return new Date(now);
+  return new Date();
+}
+
+function readExportCounts() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPORT_COUNT_KEY) || "null");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeExportCounts(counts) {
+  try {
+    localStorage.setItem(EXPORT_COUNT_KEY, JSON.stringify(counts));
+  } catch {
+    /* Storage may be blocked; the export still went through (fail open). */
+  }
+}
+
+// Exports this key has already used today (0 when none, or when the stored
+// entry is from an earlier day — the counter resets with the calendar).
+export function getExportCountForToday(licenseKey, now) {
+  if (!licenseKey) return 0;
+  const entry = readExportCounts()[String(licenseKey)];
+  if (!entry || typeof entry !== "object" || entry.date !== exportDayKey(normalizeExportNow(now))) return 0;
+  const count = Number(entry.count);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+export function getExportUsage(licenseKey, now) {
+  const count = getExportCountForToday(licenseKey, now);
+  return { count, limit: DAILY_EXPORT_LIMIT, remaining: Math.max(0, DAILY_EXPORT_LIMIT - count) };
+}
+
+export function canExport(licenseKey, now) {
+  // No key: fail open — the Pro gate already blocks keyless exports, so a
+  // missing key here must never become a new lockout path.
+  if (!licenseKey) return true;
+  return getExportCountForToday(licenseKey, now) < DAILY_EXPORT_LIMIT;
+}
+
+// Record one completed export. Returns { allowed, count, remaining }.
+// Refuses to count past the cap, so calling it without a prior canExport
+// check still can't push a key over the limit. Call this only after an
+// export actually succeeded — a failed export must not burn quota.
+export function recordExport(licenseKey, now) {
+  if (!licenseKey) return { allowed: true, count: 0, remaining: DAILY_EXPORT_LIMIT };
+  const date = normalizeExportNow(now);
+  const day = exportDayKey(date);
+  const counts = readExportCounts();
+  const key = String(licenseKey);
+  const current = getExportCountForToday(licenseKey, date);
+  if (current >= DAILY_EXPORT_LIMIT) return { allowed: false, count: current, remaining: 0 };
+  const next = current + 1;
+  counts[key] = { date: day, count: next };
+  writeExportCounts(counts);
+  return { allowed: true, count: next, remaining: DAILY_EXPORT_LIMIT - next };
+}

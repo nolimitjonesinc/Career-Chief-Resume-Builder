@@ -23,7 +23,7 @@ import { Tour } from "./components/Tour";
 import { ProDialog, ProHeaderControl } from "./components/Pro";
 import { trimForAi } from "../shared/source-limits.mjs";
 import { isProActive, licenseConfig } from "../shared/lemonsqueezy.mjs";
-import { activateLicense, deactivateLicense, getStoredLicense, maskLicenseKey, validateStoredLicense } from "./lib/license";
+import { EXPORT_LIMIT_MESSAGE, activateLicense, canExport, deactivateLicense, getStoredLicense, maskLicenseKey, recordExport, validateStoredLicense } from "./lib/license";
 import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
@@ -487,9 +487,19 @@ export function App() {
       openPro();
       return;
     }
+    // Daily export cap: 10 finished exports per license key per day
+    // (client-side friction — see license.js; it stops casual sharing,
+    // it is not a server-side wall). Failed exports don't burn quota:
+    // the count is recorded only after exportResume succeeds.
+    const storedKey = getStoredLicense()?.licenseKey;
+    if (!canExport(storedKey)) {
+      setNotice(EXPORT_LIMIT_MESSAGE);
+      return;
+    }
     setBusy(`Creating ${format.toUpperCase()}…`);
     try {
       await exportResume(doc, format);
+      recordExport(storedKey);
       setNotice(`${format.toUpperCase()} resume created from the current approved draft.`);
     } catch (error) {
       setNotice(`That export could not be created: ${error.message}`);
