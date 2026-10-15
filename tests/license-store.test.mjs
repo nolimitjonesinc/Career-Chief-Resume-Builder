@@ -38,10 +38,10 @@ const META_30 = {
   variant_id: 11, variant_name: "Career Chief Pro \u2014 30-Day",
   customer_id: 7, customer_name: "Test Buyer", customer_email: "t@example.com",
 };
-const META_LIFE = { ...META_30, variant_id: 13, variant_name: "Career Chief Pro \u2014 Lifetime" };
+const META_1YEAR = { ...META_30, variant_id: 12, variant_name: "Career Chief Pro \u2014 1-Year" };
 const CONFIG = {
   storeId: "489627",
-  tiers: [{ name: "30-Day" }, { name: "1-Year" }, { name: "Lifetime" }],
+  tiers: [{ name: "30-Day" }, { name: "1-Year" }],
 };
 
 test("no stored license means free, with no network call", async () => {
@@ -62,7 +62,7 @@ test("activation persists key, instance and pro state", async () => {
     activated: true, error: null,
     license_key: { id: 1, status: "active", created_at: "2026-10-06T00:00:00.000Z" },
     instance: { id: "inst-abc", name: "Career Chief · browser-x" },
-    meta: META_LIFE,
+    meta: META_1YEAR,
   }));
   const result = await activateLicense("  zz11-yy22  ", client, CONFIG);
   assert.equal(result.ok, true);
@@ -70,8 +70,8 @@ test("activation persists key, instance and pro state", async () => {
   assert.equal(stored.licenseKey, "ZZ11-YY22");
   assert.equal(stored.instanceId, "inst-abc");
   assert.equal(stored.state, "pro");
-  assert.equal(stored.tierName, "Lifetime");
-  assert.equal(stored.expiresAt, null);
+  assert.equal(stored.tierName, "1-Year");
+  assert.equal(stored.expiresAt, "2027-10-06T00:00:00.000Z");
 });
 
 test("activation is rejected when the key belongs to another store", async () => {
@@ -127,7 +127,7 @@ test("a fresh activation is trusted without a revalidation call", async () => {
     activated: true, error: null,
     license_key: { id: 1, status: "active", created_at: "2026-10-06T00:00:00.000Z" },
     instance: { id: "inst-abc", name: "n" },
-    meta: META_LIFE,
+    meta: META_1YEAR,
   }));
   await activateLicense("KEY-1", client);
   let calls = 0;

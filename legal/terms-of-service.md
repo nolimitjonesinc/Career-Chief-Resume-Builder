@@ -17,9 +17,8 @@ Career Chief helps you build and tailor resumes, including with AI-generated dra
 **Pro plans (one-time payments, USD):**
 - 30-Day Pass — $29, Pro for 30 days from purchase
 - 1-Year Pro — $79, Pro for 1 year from purchase
-- Lifetime Pro — $149, Pro forever, for as long as Career Chief is offered (see section 7)
 
-**What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro — lifetime or otherwise.
+**What's included:** Pro covers the features described above, including improvements we make to them over time. If we later introduce entirely new products or separately-priced add-ons, those are not part of Pro.
 
 Each license key may be activated in up to **3 browsers**. (Chrome and Safari on the same laptop count as two — a "seat" is a browser, not a computer.) Keys are for your personal use — don't share, resell, or publish them. You can free a seat anytime with "Deactivate on this browser" in the Pro dialog; if you lose access to a browser, email support@dannyjones.ai and we'll reset it.
 
@@ -59,7 +58,7 @@ We may suspend or revoke a license key for fraud, abuse, or violation of these t
 
 ## 7. Service changes and availability
 
-We may update, change, or discontinue features at any time. "Lifetime" / "forever" means for as long as Career Chief is offered — if the product is ever retired, we'll give Lifetime holders reasonable notice. The service is provided "as is," without warranties of any kind.
+We may update, change, or discontinue features at any time. If the product is ever retired, we'll give active license holders reasonable notice. The service is provided "as is," without warranties of any kind.
 
 ## 8. Limitation of liability
 

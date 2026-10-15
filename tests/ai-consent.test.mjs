@@ -52,10 +52,13 @@ test("workspace carries an AI toggle wired to the same consent state", () => {
 const termsMd = fs.readFileSync(new URL("../legal/terms-of-service.md", import.meta.url), "utf8");
 const termsHtml = fs.readFileSync(new URL("../public/terms-of-service.html", import.meta.url), "utf8");
 
-test("lifetime points to section 7 (discontinuation), not section 8", () => {
+test("terms list exactly two Pro plans and no removed tier", () => {
   for (const [label, text] of [["MD", termsMd], ["HTML", termsHtml]]) {
-    assert.match(text, /\(see section 7\)/, `${label} should point at section 7`);
-    assert.doesNotMatch(text, /\(see section 8\)/, `${label} must not point at section 8`);
+    assert.doesNotMatch(text, /lifetime/i, `${label} must not mention the removed tier`);
+    assert.doesNotMatch(text, /\$149/, `${label} must not carry the removed tier's price`);
+    assert.match(text, /30-Day Pass — \$29/, `${label} should list the 30-Day plan`);
+    assert.match(text, /1-Year Pro — \$79/, `${label} should list the 1-Year plan`);
+    assert.match(text, /active license holders reasonable notice/, `${label} should promise notice to active holders`);
   }
 });
 
