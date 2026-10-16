@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
 import {
   LicenseClient,
   DAY_MS,
@@ -51,20 +52,17 @@ test("a checkout override wins over the default buy link", () => {
 const SAMPLE_TIERS = JSON.stringify([
   { name: "30-Day", price: "$29", variant: "uuid-30", url: "https://career-chief.lemonsqueezy.com/checkout/buy/uuid-30", term: "full Pro for 30 days" },
   { name: "1-Year", price: "$79", variant: "uuid-365", term: "full Pro for 1 year" },
-  { name: "Lifetime", price: "$149", variant: "uuid-life", url: "https://career-chief.lemonsqueezy.com/checkout/buy/uuid-life/", term: "full Pro forever" },
 ]);
 
 test("parseTiers reads a valid tier list", () => {
   const tiers = parseTiers(SAMPLE_TIERS);
-  assert.equal(tiers.length, 3);
+  assert.equal(tiers.length, 2);
   assert.equal(tiers[0].name, "30-Day");
   assert.equal(tiers[0].price, "$29");
   assert.equal(tiers[0].url, "https://career-chief.lemonsqueezy.com/checkout/buy/uuid-30");
   assert.equal(tiers[0].term, "full Pro for 30 days");
-  // url built from the variant uuid when omitted
+  // url built from the variant uuid when omitted, trailing slash trimmed
   assert.equal(tiers[1].url, "https://app.lemonsqueezy.com/checkout/buy/uuid-365");
-  // trailing slash trimmed from an explicit url
-  assert.equal(tiers[2].url, "https://career-chief.lemonsqueezy.com/checkout/buy/uuid-life");
 });
 
 test("parseTiers fails closed on malformed input", () => {
@@ -92,8 +90,8 @@ test("parseTiers drops entries without a name or checkout", () => {
 test("licenseConfig exposes tiers and stays configured", () => {
   const config = licenseConfig({ VITE_LS_TIERS: SAMPLE_TIERS });
   assert.equal(config.configured, true);
-  assert.equal(config.tiers.length, 3);
-  assert.equal(config.tiers[2].name, "Lifetime");
+  assert.equal(config.tiers.length, 2);
+  assert.equal(config.tiers[1].name, "1-Year");
 });
 
 test("licenseConfig falls back to the legacy single variant", () => {
@@ -107,8 +105,21 @@ test("licenseConfig falls back to the legacy single variant", () => {
 
 test("licenseConfig prefers tiers over the legacy variant", () => {
   const config = licenseConfig({ VITE_LS_TIERS: SAMPLE_TIERS, VITE_LS_VARIANT_ID: "abc-123" });
-  assert.equal(config.tiers.length, 3);
+  assert.equal(config.tiers.length, 2);
   assert.equal(config.tiers[0].name, "30-Day");
+});
+
+// The shipped Pro dialog reads its tiers from .env.example: exactly two
+// plans (30-Day $29, 1-Year $79) — no removed tier may sneak back in.
+test("shipped .env.example lists exactly the two Pro tiers", () => {
+  const envExample = fs.readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+  const line = envExample.split("\n").find((l) => l.startsWith("VITE_LS_TIERS="));
+  assert.ok(line, "VITE_LS_TIERS line missing from .env.example");
+  const tiers = parseTiers(line.slice("VITE_LS_TIERS=".length));
+  assert.deepEqual(tiers.map((t) => t.name), ["30-Day", "1-Year"]);
+  assert.deepEqual(tiers.map((t) => t.price), ["$29", "$79"]);
+  assert.doesNotMatch(envExample, /lifetime/i);
+  assert.doesNotMatch(envExample, /\$149/);
 });
 
 // ── Key normalization ─────────────────────────────────────────────────────
@@ -334,21 +345,22 @@ test("assertLicenseMeta skips the product check when unconfigured", () => {
 
 // ── Term mapping ──────────────────────────────────────────────────────────
 
-const TIERS = [{ name: "30-Day" }, { name: "1-Year" }, { name: "Lifetime" }];
+const TIERS = [{ name: "30-Day" }, { name: "1-Year" }];
 
 test("matchTier finds the tier inside the variant name", () => {
   assert.equal(matchTier("Career Chief Pro \u2014 30-Day", TIERS).name, "30-Day");
   assert.equal(matchTier("career chief pro 1-year", TIERS).name, "1-Year");
-  assert.equal(matchTier("Lifetime Deal", TIERS).name, "Lifetime");
   assert.equal(matchTier("Something Else", TIERS), null);
   assert.equal(matchTier(null, TIERS), null);
 });
 
-test("licenseTermMs maps tiers to durations, lifetime to never", () => {
+test("licenseTermMs maps tiers to durations; unknown terms never expire", () => {
   assert.equal(licenseTermMs("Career Chief Pro \u2014 30-Day", TIERS), 30 * DAY_MS);
   assert.equal(licenseTermMs("Career Chief Pro \u2014 1-Year", TIERS), 365 * DAY_MS);
-  assert.equal(licenseTermMs("Career Chief Pro \u2014 Lifetime", TIERS), null);
   assert.equal(licenseTermMs("Mystery Tier", TIERS), null);
+  // A key from the removed tier still validates with no expiry, so nobody
+  // who already bought one gets locked out.
+  assert.equal(licenseTermMs("Career Chief Pro \u2014 Lifetime", TIERS), null);
 });
 
 test("licenseTermMs falls back to keywords when tiers are unknown", () => {
@@ -377,7 +389,7 @@ test("computeExpiresAt returns null when nothing bounds the term", () => {
     computeExpiresAt({
       createdAt: "2026-10-01T12:00:00.000Z",
       lsExpiresAt: null,
-      variantName: "Career Chief Pro \u2014 Lifetime",
+      variantName: "Mystery Tier",
       tiers: TIERS,
     }),
     null

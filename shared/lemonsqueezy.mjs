@@ -211,7 +211,9 @@ export function licenseTermMs(variantName, tiers = []) {
   // ("Career Chief Pro — 30-Day").
   const tier = matchTier(variantName, tiers);
   const haystack = `${tier ? tier.name : ""} ${variantName || ""}`.toLowerCase();
-  if (/(lifetime|life-time|forever)/.test(haystack)) return null;
+  // NOTE (Oct 2026): the Lifetime tier was removed from sale. A legacy
+  // Lifetime key falls through to null below (no expiry), so it keeps
+  // working — nobody who already bought one gets locked out.
   if (/(year|annual|12.?mo|365)/.test(haystack)) return 365 * DAY_MS;
   if (/(30|month|day)/.test(haystack)) return 30 * DAY_MS;
   return null;

@@ -31,10 +31,10 @@ test("the form becomes plain resume text using only the person's words", () => {
 test("the parser reads the generated text as a real resume, newest role first", () => {
   const d = analyzeSources([{ id: "r", kind: "resume", name: "Resume", text: starterResumeText(form) }, job], { company: "Co", role: "Ops Lead" }).doc;
   assert.equal(d.name, "Sam Rivera");
-  assert.match(d.current, /Ran a team of nine/);
-  assert.match(d.earlier, /Shift Lead/);
-  assert.equal(d.education, "B.S. Business, State University, 2017");
-  assert.equal(d.skills, "Scheduling, vendor management");
+  assert.match(d.roles[0].bullets.join(" "), /Ran a team of nine/);
+  assert.equal(d.roles[1].title, "Shift Lead");
+  assert.deepEqual(d.education, ["B.S. Business, State University, 2017"]);
+  assert.deepEqual(d.skills, ["Scheduling", "vendor management"]);
 });
 
 test("needs a name and at least one job with something done in it", () => {

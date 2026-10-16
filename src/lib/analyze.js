@@ -98,81 +98,601 @@ export function coverageFor(sources, answerTexts = []) {
   return evaluateRequirements(role, career);
 }
 
-// Real resumes carry their own section headings. When they are there, honour them:
-// keep the person's own summary, skills and education instead of replacing them.
+// ---------------------------------------------------------------------------
+// Structured resume parsing (DRAFT_VERSION 3).
+//
+// A resume is parsed into a structured document:
+//
+//   { name, title, contact, summary,
+//     roles: [{ title, company, dates, bullets: [] }],
+//     highlights: [],   // approved interview lines; folded into the newest
+//                       // role at export time, never a section of its own
+//     education: [], skills: [], interests: "" }
+//
+// Real-world PDFs (LinkedIn's "Save to PDF" especially) wrap text mid-line,
+// so headings end up glued inside lines ("605-484-3913 Summary Product
+// builder") and date ranges wrap mid-date. The parser therefore rejoins
+// wrapped fragments first, detects headings even when glued to line starts or
+// mid-sentence, and splits roles on a date range found ANYWHERE in a line —
+// never by halving the text.
+// ---------------------------------------------------------------------------
+
+const DATE_RANGE = /(?:\b(?:19|20)\d{2}\b|present|current)\s*(?:[-–—]|to)\s*(?:\b(?:19|20)\d{2}\b|present|current)/i;
+const EMAIL_RE = /[^\s@|·,;]+@[^\s@|·,;]+\.[^\s@|·,;]+/;
+const PHONE_RE = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
+const URL_RE = /\b((?:https?:\/\/)?(?:www\.)?(?:linkedin\.com\/[^\s|·,;]+|[a-z0-9-]+\.(?:com|ai|io|dev|me|co|net|org|us)(?:\/[^\s|·,;]*)?))/i;
+const LOCATION_RE = /\b([A-Z][a-z]+(?: [A-Z][a-z]+)?,\s*[A-Z]{2})\b/;
+const JUNK_LINE = /^(undefined|null|nan|none)$/i;
+// A repeated per-page header ("Danny Jones Resume", or a fragment of one) is
+// layout, not content. LinkedIn stamps it on every page; when the page
+// footer splits across extraction lines, the "Page X of Y" half is stripped
+// by ingest clean() but the name half survives and would parse as a bullet.
+// Only applied to lines that ARE a contiguous fragment of the name + "Resume"
+// sequence ("Danny", "Danny Jones", "Jones Resume", "Resume") — never to a
+// line that merely mentions the name inside a sentence.
+const normHeader = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function isPageHeaderJunk(line, name) {
+  const text = normHeader(line);
+  if (!text) return false;
+  const nameWords = [...normHeader(name || "").split(" ").filter(Boolean), "resume"];
+  const lineWords = text.split(" ").filter(Boolean);
+  if (lineWords.length > nameWords.length) return false;
+  for (let start = 0; start + lineWords.length <= nameWords.length; start++) {
+    if (nameWords.slice(start, start + lineWords.length).join(" ") === text) return true;
+  }
+  return false;
+}
+const BULLET_GLYPH = /^[•\-\*·▪◦‣]+\s*/;
+// The app's own draft prompts ("Add earlier roles…", "Contact details") are
+// not resume content — dropped when a Career Chief export is re-uploaded.
+const PROMPTS_EXACT = ["contact details", "your name", "professional title", "education"];
+const PROMPTS_PREFIX = [
+  "add your most recent role and accomplishments.",
+  "add earlier roles that strengthen this case.",
+  "add an accomplishment supported by your career history.",
+];
+const isPrompt = (line) => {
+  const text = String(line).trim().toLowerCase();
+  return PROMPTS_EXACT.includes(text) || PROMPTS_PREFIX.some((prompt) => text === prompt || text.startsWith(prompt + " "));
+};
+
 const SECTION_HEADINGS = [
   ["summary", /^(professional |career |executive )?(summary|profile|objective)$|^about( me)?$/i],
-  ["experience", /^((professional|work|relevant|career) )?experience$|^(employment|work|career)( history)?$/i],
+  ["experience", /^((professional|work|relevant|career|earlier) )?experience$|^(employment|work|career)( history)?$/i],
   ["education", /^education( (and|&) (training|certifications?))?$/i],
   ["skills", /^((core|key|technical|professional) )?(skills|competencies)$|^(skills (and|&) tools|capabilities|expertise)$/i],
-  ["other", /^(certifications?|licenses?|projects?|awards?( (and|&) honou?rs)?|publications?|volunteer(ing)?( experience)?|languages|interests)$/i],
+  ["interests", /^interests$/i],
+  ["other", /^(certifications?|licenses?|projects?|awards?( (and|&) honou?rs)?|publications?|volunteer(ing)?( experience)?|languages)$/i],
+  // The app's own interview scaffolding: recognized so it can be dropped,
+  // never parsed as resume content.
+  ["drop", /^highlights( for this role)?$/i],
 ];
-const headingOf = (line) => {
+const headingAlone = (line) => {
   const label = line.replace(/[:\s]+$/, "").trim();
-  if (label.length > 40) return null;
+  if (label.length > 48) return null;
   return SECTION_HEADINGS.find(([, pattern]) => pattern.test(label))?.[0] || null;
 };
-const DATE_RANGE = /(?:\b(?:19|20)\d{2}\b|present|current)\s*(?:[-–—]|to)\s*(?:\b(?:19|20)\d{2}\b|present|current)/i;
-
-// Returns null when the resume has no experience heading, so the old guess-by-halves path still applies.
-function splitSections(bodyLines) {
-  const found = { summary: [], experience: [], education: [], skills: [], other: [] };
-  let at = null;
-  let sawExperience = false;
-  for (const line of bodyLines) {
-    const heading = headingOf(line);
-    if (heading) { at = heading; if (heading === "experience") sawExperience = true; if (heading === "other") found.other.push(line.replace(/[:\s]+$/, "").toUpperCase()); continue; }
-    if (at) found[at].push(line);
+// Normalize a heading label for repeat detection ("Education & Training" and
+// "education & training" are the same heading; "Education" is not).
+const normLabel = (s) => String(s).toLowerCase().replace(/[:\s]+$/, "").replace(/\s+/g, " ").trim();
+// A heading glued to the start of a content line: "Summary Product builder…".
+// The remainder must start uppercase (or be empty / after a colon), so a bullet
+// like "Experience with Python" is not mistaken for a heading.
+const headingPrefix = (line) => {
+  const colon = line.match(/^([A-Za-z&() ]+?)\s*:\s*(.*)$/);
+  if (colon) {
+    const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(colon[1].trim()))?.[0];
+    if (key) return { key, rest: colon[2].trim(), label: normLabel(colon[1]) };
   }
-  if (!sawExperience || !found.experience.length) return null;
-  return found;
+  const words = line.split(/\s+/);
+  for (let n = Math.min(4, words.length - 1); n >= 1; n--) {
+    const label = words.slice(0, n).join(" ");
+    if (label.length > 40) continue;
+    const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(label))?.[0];
+    if (!key) continue;
+    const rest = words.slice(n).join(" ").trim();
+    if (rest && !/^[A-Z0-9(]/.test(rest)) continue;
+    return { key, rest, label: normLabel(label) };
+  }
+  return null;
+};
+// A heading glued mid-line after a sentence: "...brands. Experience Founder…"
+const MID_HEADING_RE = /(?<=[.!?])\s+(?=((professional |career |executive )?(summary|profile|objective)|((professional|work|relevant|career|earlier) )?experience|(employment|work|career)( history)?|education( (and|&) (training|certifications?))?|((core|key|technical|professional) )?(skills|competencies)|(skills (and|&) tools|capabilities|expertise)|interests|certifications?)\b)/i;
+// Headings glued with no sentence end ("…productions Education & Training
+// Black Hills…", "…(2003) Skills Product:…"): only split when the text after
+// the heading starts with a capital or digit, so "customer education across"
+// and "experience managing" are left alone.
+const LOOSE_MID_HEADING_RE = /(?<=\s)(Education & Training|Work Experience|Professional Experience|Technical Skills|Core Skills|Key Skills|Core Competencies|Areas of Expertise|Selected Work|Earlier Experience)(?=\s+[A-Z0-9])/i;
+const LOOSE_SINGLE_HEADING_RE = /(?<=\s)(Summary|Experience|Education|Employment|Skills|Interests|Projects|Certifications|Volunteering)(?=\s+[A-Z0-9])/;
+
+const splitLineOnHeading = (line) => {
+  // Cut points where a heading starts mid-line: after a sentence, or glued
+  // with no sentence end when the following text starts capitalized.
+  const cuts = [];
+  // For MID the match is the preceding whitespace (heading in group 1); for
+  // the LOOSE patterns the match IS the heading word.
+  const cutAt = (re, matchIsHeading) => {
+    const rx = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    let m;
+    while ((m = rx.exec(line)) !== null) {
+      const word = (m[1] || "").trim();
+      const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(word))?.[0];
+      if (!key) continue;
+      const start = matchIsHeading ? m.index : m.index + m[0].length;
+      if (cuts.some((cut) => Math.abs(cut.start - start) < word.length + 1)) continue;
+      cuts.push({ start, end: start + word.length, key, label: normLabel(word) });
+    }
+  };
+  cutAt(MID_HEADING_RE, false);
+  cutAt(LOOSE_MID_HEADING_RE, true);
+  cutAt(LOOSE_SINGLE_HEADING_RE, true);
+  cuts.sort((a, b) => a.start - b.start);
+  if (!cuts.length) return [{ heading: null, label: null, text: line }];
+  const segments = [];
+  let cursor = 0;
+  let currentKey = null;
+  let currentLabel = null;
+  for (const cut of cuts) {
+    const before = line.slice(cursor, cut.start).trim();
+    if (before) segments.push({ heading: currentKey, label: currentLabel, text: before });
+    currentKey = cut.key;
+    currentLabel = cut.label;
+    cursor = cut.end;
+  }
+  const tail = line.slice(cursor).trim();
+  if (tail) segments.push({ heading: currentKey, label: currentLabel, text: tail });
+  return segments.filter((segment) => segment.text);
+};
+
+// The text before a date range reads like a role header (title + company):
+// it names a title word and either has a comma or is short.
+function beforeDateLooksLikeRoleHead(before) {
+  const text = String(before || "").trim();
+  if (!text) return false;
+  if (!TITLE_WORD_RE.test(text)) return false;
+  const words = text.split(/\s+/).filter(Boolean);
+  return /,/.test(text) || words.length <= 8;
+}
+// A line starts a new role when its date range is preceded by a title-like
+// phrase ("Director, Freelance (2017 – Present)", "Photographer (2000 –
+// Present)"). A bare date range ("2021 – Present) Shipped…") is the tail of
+// a wrapped date, not a new role.
+function lineStartsRole(line) {
+  if (!/^[A-Z0-9(]/.test(line)) return false;
+  const m = line.match(DATE_RANGE);
+  if (!m) return false;
+  return beforeDateLooksLikeRoleHead(line.slice(0, m.index));
+}
+// A role title wrapped across lines ("…producer Photographer, Danny Jones" /
+// "Photography (2000 – Present)…"): the tail of the previous line plus the
+// text before this line's date range reads like a role header. The line must
+// NOT join, or the title fragment is swallowed into the previous bullet and
+// the role vanishes.
+function lineCompletesRoleTitle(prev, line) {
+  const m = line.match(DATE_RANGE);
+  if (!m) return false;
+  const prevTail = String(prev || "").split(/\s+/).slice(-4).join(" ");
+  return beforeDateLooksLikeRoleHead(`${prevTail} ${line.slice(0, m.index)}`);
 }
 
-function roleBlocks(lines) {
-  const blocks = [];
-  for (const line of lines) {
-    if (DATE_RANGE.test(line) && line.length < 160) blocks.push([line]);
-    else if (blocks.length) blocks.at(-1).push(line);
-    else blocks.push([line]);
+// Rejoin lines that a narrow-column PDF wrapped mid-sentence. A fragment joins
+// the previous line when the previous line does not end with terminal
+// punctuation (. ! ?), whatever case the fragment starts with — wrapped lines
+// often start with a capital (a proper noun like "Supabase", a product name
+// like "Loomiverse.ai"). The join stops at a heading, a role header, a
+// date-range start, a contact line, a prompt, a page-header fragment, or the
+// name line itself.
+function rejoinWrapped(lines) {
+  const { name } = splitNameLine(lines[0] || "");
+  const out = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || JUNK_LINE.test(line)) continue;
+    const prev = out.at(-1);
+    // The name line is split by parseHeader; gluing the headline onto it
+    // corrupts the name ("Danny Jones Founder & … | 1st Assistant…" splits
+    // at the pipe, not at the title words).
+    const prevIsNameLine = out.length === 1;
+    // Only a PURE heading line blocks a join. A heading-prefix line
+    // ("Experience Photographer, … (2000 – Present)") carries content after
+    // the heading — the next line continues that content, and blocking the
+    // join would leave a bullet line whose date range spawns a phantom role.
+    const prevIsHeading = prev && headingAlone(prev);
+    const lineIsHeading = headingAlone(line) || headingPrefix(line);
+    // A new contact line (email/phone first) or a line starting with a
+    // structural pipe is a fresh block, not a wrapped sentence fragment.
+    const lineIsContact = /^[^\s@|·,;]+@[^\s@|·,;]+\.[^\s@|·,;]+/.test(line) || /^(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/.test(line);
+    const lineIsSeparator = /^[|·•]/.test(line);
+    // A prompt line ("Contact details", "Add your most recent role…") is a
+    // standalone block: never glued onto the previous line, and nothing
+    // glues onto it — it marks a boundary, not a sentence continuation.
+    const lineIsPrompt = isPrompt(line);
+    const prevIsPrompt = prev && isPrompt(prev);
+    // A per-page header fragment ("Danny Jones Resume") is layout, not
+    // content: never glued onto a content line, and nothing glues onto it.
+    const lineIsPageHeader = name && isPageHeaderJunk(line, name);
+    const prevIsPageHeader = prev && name && isPageHeaderJunk(prev, name);
+    // A line starting with a date range starts a new role — unless the
+    // previous line ends mid-date ("(2022 –"), when the range is the tail of
+    // a wrapped date, not a new role.
+    const dateAtStart = line.match(DATE_RANGE);
+    const lineStartsWithDateRange = dateAtStart && dateAtStart.index <= 1 && !/[-–—(]$/.test(prev || "");
+    const lineIsRole = lineStartsRole(line) || lineCompletesRoleTitle(prev, line) || lineStartsWithDateRange;
+    const continues = prev && !prevIsNameLine && !prevIsHeading && !lineIsHeading && !lineIsRole
+      && !lineIsContact && !lineIsSeparator && !lineIsPrompt && !prevIsPrompt
+      && !lineIsPageHeader && !prevIsPageHeader
+      && !BULLET_GLYPH.test(line)
+      && !/[.!?]$/.test(prev);
+    if (continues) out[out.length - 1] = `${prev} ${line}`;
+    else out.push(line);
   }
-  return blocks;
+  return out;
+}
+
+const TITLE_WORDS = /\b(founder|co-?founder|ceo|cto|cfo|coo|president|vp|vice president|director|manager|engineer|developer|designer|builder|leader|head|assistant|analyst|consultant|specialist|marketer|writer|photographer|architect|producer|strategist|administrator|coordinator)\b/i;
+
+// First line is the name; when the extractor glued the headline onto it
+// ("Danny Jones Founder & AI Product Builder"), split before the title words.
+function splitNameLine(line) {
+  const atPipe = line.search(/\s[|·•]\s/);
+  if (atPipe > 0) return { name: line.slice(0, atPipe).trim(), extra: line.slice(atPipe).replace(/^[\s|·•]+/, "").trim() };
+  const words = line.trim().split(/\s+/);
+  if (words.length <= 3) return { name: line.trim(), extra: "" };
+  const titleAt = words.findIndex((word, index) => index > 0 && TITLE_WORDS.test(word));
+  if (titleAt > 1) return { name: words.slice(0, titleAt).join(" "), extra: words.slice(titleAt).join(" ") };
+  return { name: words.slice(0, 3).join(" "), extra: words.slice(3).join(" ") };
+}
+
+// A role title wrapped across lines ("…toy 1st Assistant" / "Director,
+// Freelance (2017 – …)"): the fragment is a trailing run of 2–4 capitalized
+// words after a lowercase word, and it names a title ("assistant",
+// "photographer"). Only recovered when the dated line's own title is a stub.
+const TITLE_FRAG_RE = /^(.*?\s)((?:[A-Z0-9][\w&',-]*\s+){1,3}[A-Z0-9][\w&',-]*)$/;
+const TITLE_WORD_RE = /\b(director|assistant|manager|lead|head|chief|officer|president|vp|vice|engineer|developer|designer|photographer|producer|editor|writer|analyst|consultant|specialist|coordinator|executive|founder|partner|associate|architect|scientist|marketer)\b/i;
+
+function extractContactBits(line, bits) {
+  let rest = line;
+  const take = (pattern, key) => {
+    const match = rest.match(pattern);
+    if (match && !bits[key]) { bits[key] = match[1] || match[0]; rest = rest.replace(match[0], " "); }
+  };
+  // A 2-word city ("Los Angeles, CA") wins, unless the first word is a job
+  // title ("Manager Austin, TX" is Austin, not "Manager Austin").
+  const takeLocation = () => {
+    if (bits.location) return;
+    const re = new RegExp(LOCATION_RE.source, "g");
+    let m, fallback = null;
+    while ((m = re.exec(rest)) !== null) {
+      const cityWords = m[1].split(",")[0].trim().split(/\s+/);
+      if (cityWords.length === 1 || !TITLE_WORD_RE.test(cityWords[0])) {
+        bits.location = m[1];
+        rest = rest.replace(m[0], " ");
+        return;
+      }
+      fallback = fallback || { index: m.index + cityWords[0].length };
+    }
+    if (fallback) {
+      const single = rest.slice(fallback.index).match(LOCATION_RE);
+      if (single) { bits.location = single[1]; rest = rest.replace(single[0], " "); }
+    }
+  };
+  take(EMAIL_RE, "email");
+  take(PHONE_RE, "phone");
+  take(URL_RE, "url");
+  takeLocation();
+  rest = rest.replace(/[|·•,;\s]+$/g, "").replace(/^[|·•,;\s]+/g, "").trim();
+  return rest;
+}
+
+// Header block: name, headline, and one clean contact line composed from
+// whatever contact bits the extractor scattered across the first lines.
+// Scanning stops at the first section heading so headings are never eaten.
+function parseHeader(lines) {
+  const { name, extra } = splitNameLine(lines[0] || "");
+  const bits = { location: "", url: "", email: "", phone: "" };
+  const body = [];
+  if (extra) body.push(extra);
+  let i = 1;
+  for (; i < Math.min(lines.length, 8); i++) {
+    const line = lines[i];
+    if (headingAlone(line) || headingPrefix(line)) break;
+    const rest = extractContactBits(line, bits);
+    // Contact bits are taken even when section content follows on the same
+    // line; the remainder flows into the body for section parsing.
+    if (rest) body.push(rest);
+    if (MID_HEADING_RE.test(line)) { i++; break; }
+  }
+  const contact = [bits.location, bits.url, bits.email, bits.phone].filter(Boolean).join(" | ");
+  // The headline itself can wrap ("Founder & AI Product Builder" /
+  // "| 1st Assistant Director"): take body lines until a heading, a dated
+  // role line, or a bullet, and join them as the title.
+  const titleLines = [];
+  while (body.length && !headingAlone(body[0]) && !headingPrefix(body[0]) && !DATE_RANGE.test(body[0]) && !/^([•\-*]|\d+[.)])\s/.test(body[0])) {
+    titleLines.push(body.shift());
+  }
+  // The name line sometimes repeats the headline ("Danny Jones Founder & …")
+  // while the next line has the full version: drop the duplicated stub.
+  if (titleLines.length > 1 && titleLines[1].startsWith(titleLines[0])) titleLines.shift();
+  const title = titleLines.filter((line) => !isPrompt(line)).join(" | ");
+  return { name: name || "", title, contact, rest: [...body, ...lines.slice(i)] };
+}
+
+function parseRoleHead(before) {
+  const text = before.replace(/\s+[|·•]\s*.*$/, "").trim();
+  let title = text;
+  let company = "";
+  const commaParts = text.split(/\s*,\s*/);
+  if (commaParts.length > 1) {
+    // A trailing location ("Austin TX") is not the company.
+    if (/^[A-Z][a-z]+(?: [A-Z][a-z]+)*(?:,? [A-Z]{2})$/.test(commaParts.at(-1))) commaParts.pop();
+    company = commaParts.at(-1) || "";
+    title = commaParts.slice(0, -1).join(", ");
+  } else {
+    // "Rivermark Health — Senior Brand Marketing Manager": company first.
+    const dash = text.split(/\s+[–—-]\s+/);
+    if (dash.length === 2 && dash[0] && dash[1]) {
+      company = dash[0].trim();
+      title = dash[1].trim();
+    }
+  }
+  return { title: title.trim(), company: company.trim() };
+}
+
+const toBullets = (lines, name = "") => {
+  let bullets = lines
+    .flatMap((line) => String(line).split(/(?<=[.!?])\s+(?=[A-Z0-9(])/))
+    .map((line) => line.replace(BULLET_GLYPH, "").trim())
+    .filter((line) => line && !JUNK_LINE.test(line) && line.length > 1);
+  // A bullet that IS a page-header fragment ("Danny Jones Resume") is layout,
+  // not content.
+  if (name) bullets = bullets.filter((bullet) => !isPageHeaderJunk(bullet, name));
+  // A page-header shard glued to a sentence start ("Danny Supervised…") is
+  // layout: strip it, keeping the sentence.
+  if (name) {
+    bullets = bullets.map((bullet) => {
+      let text = bullet;
+      for (let guard = 0; guard < 3; guard++) {
+        const words = text.split(/\s+/);
+        let stripped = null;
+        for (let n = Math.min(3, words.length - 1); n >= 1; n--) {
+          if (isPageHeaderJunk(words.slice(0, n).join(" "), name) && /^[A-Z0-9]/.test(words[n])) { stripped = words.slice(n).join(" "); break; }
+        }
+        if (!stripped) break;
+        text = stripped;
+      }
+      return text;
+    }).filter((bullet) => bullet && !isPageHeaderJunk(bullet, name));
+  }
+  // A stranded qualifier ("selective)") at a bullet start is the tail of a
+  // parenthetical date range, not a sentence.
+  bullets = bullets.map((bullet) => bullet.replace(/^[a-z][\w'&.-]*\)\s*/, "").trim()).filter(Boolean);
+  // Merge a bullet that ends mid-phrase into the next one, so no bullet ends
+  // with a comma or a dangling word ("…film sets, and" + "landscapes…" →
+  // "…film sets, and landscapes…").
+  const merged = [];
+  for (const bullet of bullets) {
+    const prev = merged.at(-1);
+    if (prev !== undefined && DANGLING_END.test(prev)) merged[merged.length - 1] = `${prev} ${bullet}`.trim();
+    else merged.push(bullet);
+  }
+  // A dangling tail with no next bullet to absorb it is cut, not kept:
+  // "…film sets, and" → "…film sets".
+  return merged.map((bullet) => {
+    let text = bullet;
+    while (DANGLING_END.test(text)) text = text.replace(DANGLING_END, "").trim();
+    return text;
+  }).filter(Boolean);
+};
+// A bullet ending that means the sentence kept going: a comma/semicolon, a
+// trailing dash, or a dangling conjunction/article/preposition. ("to", "in",
+// "on", "at" are left out — "Logged in", "Switched on" are complete.)
+const DANGLING_END = /(?:[,;:–—-]| (?:and|or|with|of|for|the|a|an|&))$/i;
+
+const normLine = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const dedupeLines = (lines) => {
+  const seen = new Set();
+  return lines.filter((line) => {
+    const key = normLine(line);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+// Split experience lines into roles on a date range found ANYWHERE in a line.
+// Text before the first dated line is held as pending and prepended to that
+// role's header — narrow-column PDFs often wrap "…Founder &" / "AI Product
+// Builder, … (2022 –" across lines. Repeated roles and bullets (a PDF that
+// prints its content twice) collapse into one.
+function splitRoles(lines, name = "") {
+  const roles = [];
+  let pending = [];
+  for (const line of lines) {
+    const match = line.match(DATE_RANGE);
+    if (match) {
+      let before = [...pending, line.slice(0, match.index).trim()].join(" ").trim().replace(/[,;:([\-–—\s]+$/, "");
+      pending = [];
+      const after = line.slice(match.index + match[0].length).trim().replace(/^[,;:\-–—\s)]+/, "");
+      // A parenthetical qualifier stranded after a date range ("(2017 –
+      // Present, selective) DGA member…", "(2015 – 2018, selective)") is
+      // part of the date, not a bullet.
+      const dateInParens = (line.slice(0, match.index).match(/\(/g) || []).length > (line.slice(0, match.index).match(/\)/g) || []).length;
+      const afterClean = dateInParens ? after.replace(/^[a-z][\w'&.-]*\)\s*/, "") : after;
+      // Recover a title fragment stranded at the end of the previous bullet.
+      const prev = roles.at(-1);
+      if (prev?.bullets.length && before.split(",")[0].trim().split(/\s+/).filter(Boolean).length <= 2) {
+        const lastBullet = prev.bullets[prev.bullets.length - 1];
+        const frag = lastBullet && !/[.!?:;]$/.test(lastBullet) ? lastBullet.match(TITLE_FRAG_RE) : null;
+        if (frag && /[a-z]$/.test(frag[1].trim()) && TITLE_WORD_RE.test(frag[2])) {
+          prev.bullets[prev.bullets.length - 1] = frag[1].trim();
+          before = `${frag[2]} ${before}`.trim();
+        }
+      }
+      let { title, company } = parseRoleHead(before);
+      // Bullet spill: a long title starting with lowercase words ("landscapes
+      // Mount Rushmore…") loses the spill.
+      if (title.split(/\s+/).filter(Boolean).length > 3) title = title.replace(/^(?:[a-z][\w&'-]*\s+)+/, "").trim();
+      // A page-header fragment stranded after a date range ("(2009 – 2017)
+      // Danny") is layout, not a bullet.
+      const afterBullet = afterClean && !isPageHeaderJunk(afterClean, name) ? [afterClean] : [];
+      roles.push({ title, company, dates: match[0].trim(), bullets: afterBullet });
+    } else if (roles.length) {
+      roles.at(-1).bullets.push(line);
+    } else {
+      pending.push(line);
+    }
+  }
+  if (!roles.length && pending.length) {
+    roles.push({ title: "", company: "", dates: "", bullets: pending });
+  }
+  const out = [];
+  for (const role of roles) {
+    const key = [role.title, role.company, role.dates].map(normLine).join("|");
+    const existing = out.find((r) => [r.title, r.company, r.dates].map(normLine).join("|") === key);
+    if (existing) {
+      existing.bullets.push(...role.bullets);
+      continue;
+    }
+    out.push(role);
+  }
+  return out.map((role) => ({ ...role, bullets: dedupeLines(toBullets(role.bullets, name)) }));
+}
+
+const EDUCATION_HINT = /(\b(B\.?A\.?|B\.?S\.?|M\.?B\.?A\.?|M\.?A\.?|M\.?S\.?|Ph\.?D\.?|J\.?D\.?)\b|university|college|school of|institute of|certificat)/i;
+
+// Parse resume text into the structured doc model. Never throws: the worst
+// case is a sparse doc, never a crash and never invented content.
+export function parseResumeText(resumeText) {
+  const rawLines = String(resumeText || "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  if (!rawLines.length) {
+    return { name: "", title: "", contact: "", summary: "", roles: [], highlights: [], education: [], skills: [], interests: "" };
+  }
+  const { name, title, contact, rest } = parseHeader(rejoinWrapped(rawLines));
+  // Drop repeated per-page headers that survived extraction ("Danny Jones
+  // Resume", bare name lines) before they can parse as bullets. The real
+  // header block was already consumed by parseHeader, so a line that IS the
+  // name out here is layout, not content.
+  const content = rest.filter((line) => !isPageHeaderJunk(line, name));
+  const sections = { summary: [], experience: [], education: [], skills: [], interests: [], other: [], drop: [] };
+  let at = null;
+  // A second document concatenated onto the first (a LinkedIn PDF with an
+  // old export appended) repeats its section headings. The first repeat of a
+  // heading that already has content means the first document ended: drop
+  // the whole line and stop — the leading text is second-document content
+  // too, and everything after it belongs to the second document. Scaffolding
+  // headings ("drop") never truncate; a heading repeating with an empty
+  // section does not truncate either.
+  const seenLabels = new Set();
+  let stopped = false;
+  const isRepeatHeading = (key, label) => key && key !== "drop" && label && seenLabels.has(label) && sections[key]?.length > 0;
+  const noteHeading = (key, label) => { if (key && label) seenLabels.add(label); };
+  const feedText = (heading, text) => {
+    if (heading) at = heading;
+    if (text && at) sections[at].push(text);
+    else if (text && !at) sections.experience.push(text);
+    // "drop" sections (app scaffolding) are collected and ignored.
+  };
+  const feedLine = (line) => {
+    if (stopped) return;
+    // "Contact details" after a full resume has already been fed is the
+    // LinkedIn end-of-resume marker: everything after it is a concatenated
+    // second copy (then an AI summary, then template scaffolding). Stop.
+    // A "Contact details" line before any content is just a prompt, and is
+    // filtered out below like any other prompt.
+    if (normLabel(line) === "contact details"
+      && (sections.summary.length || sections.experience.length || sections.education.length || sections.skills.length || sections.interests.length)) { stopped = true; return; }
+    const alone = headingAlone(line);
+    if (alone) {
+      const label = normLabel(line);
+      if (isRepeatHeading(alone, label)) { stopped = true; return; }
+      noteHeading(alone, label);
+      at = alone; return;
+    }
+    // A heading stranded at the end of a line ("…storytelling Interests"):
+    // the head stays in the current section, the next line starts the new one.
+    const trailing = line.match(/\s((?:Education(?: & Training)?|Professional Experience|Work Experience|Technical Skills|Core Skills|Summary|Experience|Employment|Skills|Interests|Projects|Certifications))\s*$/);
+    if (trailing) {
+      const key = SECTION_HEADINGS.find(([, pattern]) => pattern.test(trailing[1]))?.[0];
+      if (key) {
+        const label = normLabel(trailing[1]);
+        if (isRepeatHeading(key, label)) { stopped = true; return; }
+        noteHeading(key, label);
+        const head = line.slice(0, trailing.index).trim();
+        if (head) feedText(null, head);
+        at = key;
+        return;
+      }
+    }
+    const prefixed = headingPrefix(line);
+    if (prefixed) {
+      // The remainder can itself contain further glued headings: check every
+      // heading in the line for a repeat BEFORE feeding any of it.
+      const segments = splitLineOnHeading(prefixed.rest);
+      if (isRepeatHeading(prefixed.key, prefixed.label) || segments.some((segment) => isRepeatHeading(segment.heading, segment.label))) { stopped = true; return; }
+      noteHeading(prefixed.key, prefixed.label);
+      feedText(prefixed.key, null);
+      for (const segment of segments) { noteHeading(segment.heading, segment.label); feedText(segment.heading, segment.text); }
+      return;
+    }
+    const segments = splitLineOnHeading(line);
+    if (segments.some((segment) => isRepeatHeading(segment.heading, segment.label))) { stopped = true; return; }
+    for (const segment of segments) { noteHeading(segment.heading, segment.label); feedText(segment.heading, segment.text); }
+  };
+  for (const line of content) feedLine(line);
+  for (const key of Object.keys(sections)) sections[key] = sections[key].filter((line) => !isPrompt(line));
+  // No headings at all: leading lines without date ranges are the summary,
+  // everything from the first role header on is experience.
+  if (!at && !sections.experience.length) {
+    const firstRole = content.findIndex((line) => DATE_RANGE.test(line));
+    const lead = firstRole < 0 ? content : content.slice(0, firstRole);
+    sections.summary.push(...lead.filter((line) => !EDUCATION_HINT.test(line)));
+    sections.education.push(...lead.filter((line) => EDUCATION_HINT.test(line)));
+    if (firstRole >= 0) sections.experience.push(...content.slice(firstRole));
+  }
+  // Stray education lines hiding in experience (no heading case) get rescued.
+  const rescued = [];
+  sections.experience = sections.experience.filter((line) => {
+    if (!DATE_RANGE.test(line) && EDUCATION_HINT.test(line) && line.length < 160) { rescued.push(line); return false; }
+    return true;
+  });
+  const education = dedupeLines([...sections.other, ...sections.education, ...rescued]);
+  const skills = dedupeLines(sections.skills
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
+    .flatMap((line) => line.split(/\s*[,·|;•]\s*/))
+    .flatMap((line) => line.split(/(?<=[a-z])\s+(?=[A-Z][a-z]+:)/))
+    .map((item) => item.replace(/^[A-Z][a-z]+:\s*/, "").replace(BULLET_GLYPH, "").replace(/[.]+$/, "").trim())
+    .filter((item) => item && !JUNK_LINE.test(item) && item.length > 1 && !isPrompt(item)));
+  return {
+    name, title, contact,
+    summary: sections.summary.join(" ").trim(),
+    roles: splitRoles(sections.experience, name),
+    highlights: [],
+    education: education.map((line) => line.trim()).filter(Boolean),
+    skills,
+    interests: dedupeLines(sections.interests.flatMap((line) => line.split(/(?<=[.!?])\s+(?=[A-Z0-9(])/))).join(" ").trim(),
+  };
+}
+
+// Split free-typed experience text back into roles (used by the resume editor).
+export function textToRoles(text) {
+  return splitRoles(String(text || "").split(/\n+/).map((line) => line.trim()).filter(Boolean));
 }
 
 function makeDoc(resumeText, role, candidateContext = "") {
-  const lines = resumeText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
-  const name = lines[0] || "Your name";
-  const title = lines[1] || role || "Professional title";
-  const contactIndex = lines.findIndex((line) => /@|linkedin|\d{3}[-.) ]\d{3}/i.test(line));
-  const contact = contactIndex > 1 ? lines[contactIndex] : "Contact details";
-  const bodyLines = lines.slice(contactIndex > 1 ? contactIndex + 1 : 2);
+  const doc = parseResumeText(resumeText);
   const suppliedAccomplishment = candidateContext.split(/(?<=[.!?])\s+/)[0]?.trim();
-  const firstName = name.split(/\s+/)[0];
+  const firstName = doc.name.split(/\s+/)[0] || "";
   const candidateLine = suppliedAccomplishment?.replace(new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+`, "i"), "") || "";
-  const sections = splitSections(bodyLines);
-  const cannedSummary = role ? `${title} with experience relevant to ${role}. Brings cross-functional leadership, audience understanding, and evidence-led storytelling.` : `${title} with cross-functional leadership and evidence-led storytelling experience.`;
-  const cannedSkills = "Leadership · Strategy · Storytelling · Cross-functional collaboration";
-  const finish = (currentText, earlierText, extras) => {
-    const firstCareerSentence = currentText.split(/(?<=[.!?])\s+/).find((line) => /\b(led|built|created|directed|developed|managed|launched|improved)\b/i.test(line)) || currentText;
-    const tailored = candidateLine || firstCareerSentence || "Add an accomplishment supported by your career history.";
-    return {
-      name, title, contact,
-      summary: extras.summary || cannedSummary,
-      current: currentText || "Add your most recent role and accomplishments.",
-      tailored: tailored.charAt(0).toUpperCase() + tailored.slice(1).replace(/[.\s]+$/, "") + ".",
-      earlier: earlierText || "Add earlier roles that strengthen this case.",
-      education: extras.education || "Education",
-      skills: extras.skills || cannedSkills,
-    };
-  };
-  if (sections) {
-    const blocks = roleBlocks(sections.experience);
-    const earlier = [...blocks.slice(1).flat(), ...sections.other].join("\n");
-    return finish(blocks[0].join("\n"), earlier, { summary: sections.summary.join(" "), education: sections.education.join("; "), skills: sections.skills.join(" ") });
+  if (!doc.summary) {
+    doc.summary = role
+      ? `${doc.title || "Professional"} with experience relevant to ${role}. Brings cross-functional leadership, audience understanding, and evidence-led storytelling.`
+      : `${doc.title || "Professional"} with cross-functional leadership and evidence-led storytelling experience.`;
   }
-  const educationLine = lines.find((line) => /^\s*education\b|^\s*(BA|BS|B\.A\.|B\.S\.|MBA|MA|MS|PhD)\b|university|college/i.test(line)) || "Education";
-  const careerLines = bodyLines.filter((line) => line !== educationLine);
-  const splitAt = Math.min(careerLines.length, Math.max(2, Math.ceil(careerLines.length / 2)));
-  return finish(careerLines.slice(0, splitAt).join("\n"), careerLines.slice(splitAt).join("\n"), { education: educationLine });
+  if (!doc.skills.length) doc.skills = ["Leadership", "Strategy", "Storytelling", "Cross-functional collaboration"];
+  if (candidateLine) {
+    const line = candidateLine.charAt(0).toUpperCase() + candidateLine.slice(1).replace(/[.\s]+$/, "") + ".";
+    doc.highlights = [line];
+  }
+  return doc;
 }
 
 // Presentations show the work; the user decides what to claim from it. One
