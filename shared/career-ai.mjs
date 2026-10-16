@@ -388,8 +388,8 @@ async function concierge(payload, auth, fetchImpl, maxBytes) {
 const priorOk = (value) => value === undefined || (Array.isArray(value) && value.every((item) => isText(item) || (isObject(item) && (item.text === undefined || isText(item.text)))));
 const stringList = (value, max = 12) => value === undefined || (Array.isArray(value) && value.length <= max && value.every(isText));
 const conciergeOk = (p) => common(p) && isText(p.stage) && isText(p.message) && p.message.trim() &&
-  (p.doc === undefined || (isObject(p.doc) && [p.doc.summary].every((v) => v === undefined || isText(v)) &&
-    [p.doc.roles, p.doc.highlights, p.doc.skills].every((v) => v === undefined || Array.isArray(v)))) &&
+  (p.doc === undefined || p.doc === null || (isObject(p.doc) && [p.doc.summary].every((v) => v === undefined || v === null || isText(v)) &&
+    [p.doc.roles, p.doc.highlights, p.doc.skills].every((v) => v === undefined || v === null || Array.isArray(v)))) &&
   stringList(p.known) && stringList(p.gaps) && stringList(p.requirements) && stringList(p.answers, 10) &&
   (p.messages === undefined || (Array.isArray(p.messages) && p.messages.length <= 10 && p.messages.every((m) => isObject(m) && ["user", "assistant"].includes(m.role) && isText(m.text)))) &&
   (p.questions === undefined || (Array.isArray(p.questions) && p.questions.length <= 12 && p.questions.every((q) => isObject(q) && isText(q.id) && isText(q.topic) && isText(q.prompt)))) &&

@@ -65,3 +65,40 @@ test("a malformed concierge payload is rejected, not answered", async () => {
   const response = await handleCareerAI(req("/api/ai/concierge", { stage: "case" }), on(), async () => { throw new Error("Must not call network"); });
   assert.equal(response.status, 422);
 });
+
+test("fresh session with doc null returns 200 with a reply, not 422", async () => {
+  // Danny's exact state: 0% ready, no resume pasted yet, so the client sends doc: null.
+  const fetcher = async () => modelResponse(JSON.stringify({ reply: "Paste your resume and the job to begin.", action: { type: "none" } }));
+  const response = await handleCareerAI(req("/api/ai/concierge", payload({
+    role: "",
+    company: "",
+    stage: "intake",
+    currentQuestion: null,
+    doc: null,
+    known: [],
+    gaps: [],
+    requirements: [],
+    questions: [],
+    answers: [],
+    messages: [{ role: "user", text: "What should I do first?" }],
+    message: "What should I do first?",
+  })), on(), fetcher);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(typeof result.reply, "string");
+  assert.ok(result.reply.length > 0);
+});
+
+test("doc present but with null inner fields returns 200", async () => {
+  const fetcher = async () => modelResponse(JSON.stringify({ reply: "Your draft is taking shape.", action: { type: "none" } }));
+  const response = await handleCareerAI(req("/api/ai/concierge", payload({
+    doc: { summary: null, roles: null, highlights: null, skills: null },
+  })), on(), fetcher);
+  assert.equal(response.status, 200);
+  assert.equal(typeof (await response.json()).reply, "string");
+});
+
+test("a wrong-typed doc is still rejected, not answered", async () => {
+  const response = await handleCareerAI(req("/api/ai/concierge", payload({ doc: "not-an-object" })), on(), async () => { throw new Error("Must not call network"); });
+  assert.equal(response.status, 422);
+});
