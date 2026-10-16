@@ -32,6 +32,7 @@ import "./components/concierge.css";
 import { applyChatProposal as applyChatProposalToDoc, draftChatProposal, findChatTarget, strengthenLine } from "./lib/chat";
 import {
   baselineMessage,
+  conciergeAiFailureMessage,
   conciergeFocus,
   conciergePlaceholder,
   conciergeReadiness,
@@ -547,9 +548,11 @@ export function App() {
         say(result.reply);
         handleConciergeAiAction(result.action, text);
         return;
-      } catch {
+      } catch (error) {
         // Fall through to the local brain; the user still gets an answer.
-        say("AI couldn't answer that — here's what I can do from what you gave me.");
+        // Show the server's real reason (already curated server-side) so a
+        // dead key, quota, or rate cap is diagnosable instead of a mystery.
+        say(conciergeAiFailureMessage(error));
       } finally { setConciergeSending(false); }
     }
 

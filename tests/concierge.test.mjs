@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   baselineMessage,
   challengeLines,
+  conciergeAiFailureMessage,
   conciergeFocus,
   conciergeReadiness,
   conciergeStage,
@@ -259,4 +260,41 @@ test("placeholders follow the stage", () => {
   assert.match(conciergePlaceholder(base), /highlighted box/);
   assert.match(conciergePlaceholder({ ...workspace, view: "interview" }), /Answer in your own words/);
   assert.match(conciergePlaceholder({ ...workspace, modal: "proposal" }), /waiting for your approval/);
+});
+
+test("a failed AI call surfaces the server's real error in the dock", () => {
+  const serverError = "AI research has reached today's limit. The transparent analysis still works; try AI again tomorrow.";
+  const message = conciergeAiFailureMessage(new Error(serverError));
+  assert.ok(message.startsWith("AI couldn't answer that: "), message);
+  assert.ok(message.includes(serverError), message);
+});
+
+test("a failed AI call with no server message keeps the generic line", () => {
+  assert.equal(
+    conciergeAiFailureMessage(new Error("")),
+    "AI couldn't answer that — here's what I can do from what you gave me.",
+  );
+  assert.equal(
+    conciergeAiFailureMessage(undefined),
+    "AI couldn't answer that — here's what I can do from what you gave me.",
+  );
+});
+
+test("a network failure or unparseable body keeps the generic line", () => {
+  const network = new TypeError("Failed to fetch");
+  assert.equal(
+    conciergeAiFailureMessage(network),
+    "AI couldn't answer that — here's what I can do from what you gave me.",
+  );
+  const parse = new SyntaxError("Unexpected token '<'");
+  assert.equal(
+    conciergeAiFailureMessage(parse),
+    "AI couldn't answer that — here's what I can do from what you gave me.",
+  );
+});
+
+test("a surfaced server error is truncated to 300 chars", () => {
+  const long = `x`.repeat(1000);
+  const message = conciergeAiFailureMessage(new Error(long));
+  assert.equal(message, `AI couldn't answer that: ${`x`.repeat(300)}`);
 });

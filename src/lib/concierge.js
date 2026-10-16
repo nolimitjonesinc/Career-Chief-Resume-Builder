@@ -23,6 +23,21 @@ export const CONCIERGE_GREETING_INTAKE =
 export const CONCIERGE_GREETING_RETURNING =
   "Welcome back. Your draft is still here. I'll pick up where you left off — one step at a time.";
 
+// Message for a failed AI concierge call. The server already curates what it
+// returns (generic BAD for internal errors), so echoing its error string is
+// within its safety design — but surface ONLY that string, truncated. A
+// network failure or an unparseable body has no server error to show, so it
+// falls back to the generic line. Never surfaces request bodies, headers,
+// keys, or stack traces.
+export function conciergeAiFailureMessage(error) {
+  const name = error?.name || "";
+  const isServerError = error instanceof Error && name !== "SyntaxError" && name !== "TypeError";
+  const detail = isServerError ? String(error.message || "").trim().slice(0, 300) : "";
+  return detail
+    ? `AI couldn't answer that: ${detail}`
+    : "AI couldn't answer that — here's what I can do from what you gave me.";
+}
+
 // ---------------------------------------------------------------------------
 // Stage: what the concierge is doing right now. Exactly one stage at a time.
 // ---------------------------------------------------------------------------
