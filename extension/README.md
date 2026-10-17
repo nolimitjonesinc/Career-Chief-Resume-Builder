@@ -19,7 +19,12 @@ looking at it.
 ## Test it
 
 1. Open any job page: a LinkedIn job, a Glassdoor job, or a company
-   careers page (Greenhouse / Lever / etc.).
+   careers page (Greenhouse / Lever / etc.). On split-view search pages
+   (Glassdoor / LinkedIn / Indeed search with a job open in the detail
+   pane), one click saves the job in the pane — the tab title describes
+   the search, so it is never used as the role. If the page is a search
+   or listing with no single job in view, the role stays blank rather
+   than filling junk: open the single job posting and save it again.
 2. Click the extension icon → **Save this job**.
 3. Career Chief opens in a new tab with the page saved as a job source.
    Role / company / description pre-fill only where the fields are empty

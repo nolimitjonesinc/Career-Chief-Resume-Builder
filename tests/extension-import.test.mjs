@@ -80,3 +80,11 @@ test("a #import= fragment that fails to decode speaks through the dock, never si
   assert.match(app, /window\.location\.hash\.startsWith\("#import="\)/);
   assert.match(app, /say\("That saved page couldn't be read\. Try saving it again from the job page, or paste the job text instead\."\)/);
 });
+
+test("dock never claims a fill that did not happen: blank hints + blank fields get the honest guidance", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  // The "filled in the ..." claim appears only in the filled branch.
+  assert.match(app, /applied\.filled\.length\s*\?\s*`Saved "\$\{payload\.title/);
+  // The blank-hints branch names the actual outcome and the next step.
+  assert.match(app, /No role or company came with it — this looks like a search or listing page\. Open the single job posting and save it again, or type the role in\./);
+});

@@ -435,9 +435,21 @@ export function App() {
       setJobText(applied.jobText);
     }
     addSource({ id: uid(), kind: "job", name: payload.title || payload.url, origin: `Saved from browser · ${new Date().toLocaleDateString()}`, url: payload.url, text: payload.text, status: "ready" });
+    // Never claim a fill that did not happen: when the saved page yielded
+    // no usable role/company AND the fields are still blank, say so and
+    // point at the next step (open the single job posting) instead of
+    // implying the role was filled. When the user already typed the
+    // fields, the plain "as job evidence" line is the honest one.
+    const hintsBlank =
+      !payload.job?.role?.trim() &&
+      !payload.job?.company?.trim() &&
+      !(typeof payload.job?.description === "string" && payload.job.description.length >= 80);
+    const fieldsBlank = !meta?.role?.trim() && !meta?.company?.trim() && !jobText?.trim();
     say(applied.filled.length
       ? `Saved "${payload.title || payload.url}" from your browser and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.`
-      : `Saved "${payload.title || payload.url}" from your browser as job evidence.`);
+      : hintsBlank && fieldsBlank
+        ? `Saved "${payload.title || payload.url}" from your browser as job evidence. No role or company came with it — this looks like a search or listing page. Open the single job posting and save it again, or type the role in.`
+        : `Saved "${payload.title || payload.url}" from your browser as job evidence.`);
   }, []);
 
   // The guided focus ring: exactly one element wears .concierge-focus at a
