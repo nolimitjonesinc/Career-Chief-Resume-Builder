@@ -413,13 +413,21 @@ export function App() {
   // as pasted links (pre-fill empty fields only, never overwrite typed
   // values). Nothing is auto-analyzed: the user confirms the fields
   // before Analyze ever uses them. Runs once per load; the fragment is
-  // stripped so a refresh never re-imports.
+  // stripped so a refresh never re-imports. A #import= fragment that
+  // fails to decode must never fail silently (the user clicked Save and
+  // got nothing): it speaks through the dock, never the notice bar.
   const importHandled = useRef(false);
   useEffect(() => {
     if (importHandled.current) return;
     importHandled.current = true;
     const payload = decodeImportFragment(window.location.hash);
-    if (!payload) return;
+    if (!payload) {
+      if (window.location.hash.startsWith("#import=")) {
+        window.history.replaceState(null, "", stripImportFragment(window.location.href));
+        say("That saved page couldn't be read. Try saving it again from the job page, or paste the job text instead.");
+      }
+      return;
+    }
     window.history.replaceState(null, "", stripImportFragment(window.location.href));
     const applied = applyJobHints(meta, jobText, payload.job);
     if (applied.filled.length) {

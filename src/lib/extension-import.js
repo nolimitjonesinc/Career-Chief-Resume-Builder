@@ -7,9 +7,9 @@
 // UNTRUSTED input — it comes from an arbitrary web page — so it is never
 // evaluated or executed: base64url-decode, JSON-parse, shape-check, and
 // the caller treats the values exactly like pasted text (visible, editable
-// suggestions; nothing is auto-analyzed). Anything malformed returns null
-// and the import is silently ignored: a bad fragment must never crash
-// the app or poison state.
+// suggestions; nothing is auto-analyzed). Anything malformed returns null;
+// the caller surfaces that in the dock — a bad fragment must never crash
+// the app, poison state, or fail silently.
 const MAX_TEXT = 50_000;
 const MAX_TITLE = 500;
 

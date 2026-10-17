@@ -71,3 +71,12 @@ test("App wires the import: decode on load, strip the fragment, same auto-fill p
   assert.match(app, /applyJobHints\(meta, jobText, payload\.job\)/);
   assert.match(app, /Saved from browser/);
 });
+
+test("a #import= fragment that fails to decode speaks through the dock, never silently", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  // The old silent path (`if (!payload) return;`) is gone: a present-but-bad
+  // fragment must surface a dock message instead of doing nothing.
+  assert.doesNotMatch(app, /if \(!payload\) return;/);
+  assert.match(app, /window\.location\.hash\.startsWith\("#import="\)/);
+  assert.match(app, /say\("That saved page couldn't be read\. Try saving it again from the job page, or paste the job text instead\."\)/);
+});
