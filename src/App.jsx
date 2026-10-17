@@ -27,6 +27,7 @@ import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
 import { applyJobHints } from "./lib/job-autofill";
+import { decodeImportFragment, stripImportFragment } from "./lib/extension-import";
 import { ResumePreview } from "./components/ResumePreview";
 import { ConciergeDock } from "./components/Concierge";
 import "./components/concierge.css";
@@ -404,6 +405,31 @@ export function App() {
     if (greeted.current) return;
     greeted.current = true;
     say(initialDraft?.analysis || initialDraft?.doc ? CONCIERGE_GREETING_RETURNING : CONCIERGE_GREETING_INTAKE);
+  }, []);
+
+  // Extension import: a #import= fragment from "Save to Career Chief"
+  // lands here exactly like pasted text — decoded and validated only,
+  // never executed. It adds a job source and runs the same auto-fill path
+  // as pasted links (pre-fill empty fields only, never overwrite typed
+  // values). Nothing is auto-analyzed: the user confirms the fields
+  // before Analyze ever uses them. Runs once per load; the fragment is
+  // stripped so a refresh never re-imports.
+  const importHandled = useRef(false);
+  useEffect(() => {
+    if (importHandled.current) return;
+    importHandled.current = true;
+    const payload = decodeImportFragment(window.location.hash);
+    if (!payload) return;
+    window.history.replaceState(null, "", stripImportFragment(window.location.href));
+    const applied = applyJobHints(meta, jobText, payload.job);
+    if (applied.filled.length) {
+      setMeta(applied.meta);
+      setJobText(applied.jobText);
+    }
+    addSource({ id: uid(), kind: "job", name: payload.title || payload.url, origin: `Saved from browser · ${new Date().toLocaleDateString()}`, url: payload.url, text: payload.text, status: "ready" });
+    say(applied.filled.length
+      ? `Saved "${payload.title || payload.url}" from your browser and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.`
+      : `Saved "${payload.title || payload.url}" from your browser as job evidence.`);
   }, []);
 
   // The guided focus ring: exactly one element wears .concierge-focus at a
