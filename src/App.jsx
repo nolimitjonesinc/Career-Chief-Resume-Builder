@@ -26,6 +26,7 @@ import { EXPORT_LIMIT_MESSAGE, activateLicense, canExport, deactivateLicense, ge
 import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
+import { applyJobHints } from "./lib/job-autofill";
 import { ResumePreview } from "./components/ResumePreview";
 import { ConciergeDock } from "./components/Concierge";
 import "./components/concierge.css";
@@ -201,9 +202,18 @@ export function App() {
     setBusy("Reading the job link…");
     try {
       const result = await extractUrl(jobUrl.trim());
+      // Auto-fill, empty fields only: anything the user already typed stays
+      // exactly as typed. Pre-filled values sit in the same visible, editable
+      // fields — the user confirms them by seeing/editing them before Analyze
+      // ever uses them. The link is always added as evidence, filled or not.
+      const applied = applyJobHints(meta, jobText, result.job);
+      if (applied.filled.length) {
+        setMeta(applied.meta);
+        setJobText(applied.jobText);
+      }
       addSource({ id: uid(), kind: "job", name: result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" });
       setJobUrl("");
-      setNotice("The public page was read and added as job evidence.");
+      setNotice(applied.filled.length ? `Read the page and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.` : "The public page was read and added as job evidence.");
     } catch (error) {
       setNotice(`${error.message} You can download the page or paste its text instead.`);
     } finally {
