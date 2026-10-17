@@ -38,6 +38,7 @@ import {
   conciergePlaceholder,
   conciergeReadiness,
   conciergeStage,
+  jobLinkFailureMessage,
   localConciergeReply,
   nextQuestion,
   nextStepText,
@@ -215,7 +216,9 @@ export function App() {
       setJobUrl("");
       setNotice(applied.filled.length ? `Read the page and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.` : "The public page was read and added as job evidence.");
     } catch (error) {
-      setNotice(`${error.message} You can download the page or paste its text instead.`);
+      // The dock is the single driver: a failed link read speaks through
+      // the dock, never the thin notice bar (which the user never saw).
+      say(jobLinkFailureMessage(error));
     } finally {
       setBusy("");
     }

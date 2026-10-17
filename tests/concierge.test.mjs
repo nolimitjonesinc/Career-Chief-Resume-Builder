@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
 import {
   baselineMessage,
   challengeLines,
@@ -8,6 +9,7 @@ import {
   conciergeReadiness,
   conciergeStage,
   evidenceSearchFor,
+  jobLinkFailureMessage,
   localConciergeReply,
   nextQuestion,
   nextStepText,
@@ -297,4 +299,50 @@ test("a surfaced server error is truncated to 300 chars", () => {
   const long = `x`.repeat(1000);
   const message = conciergeAiFailureMessage(new Error(long));
   assert.equal(message, `AI couldn't answer that: ${`x`.repeat(300)}`);
+});
+
+// ── Job-link failure: visible in the dock, never the thin notice bar ──────
+// Glassdoor/LinkedIn bot walls return 4xx from /api/extract-url; the route
+// is working as designed, but the user saw NOTHING — the notice bar alone
+// never reached him. The failure must speak through the dock.
+
+test("a failed link read shows the server error plus the plain-words fallback", () => {
+  const message = jobLinkFailureMessage(new Error("The page returned 403."));
+  assert.match(message, /The page returned 403\./);
+  assert.match(message, /Paste the job text instead, or use the company's own careers page link\./);
+});
+
+test("a failed link read with no server message keeps the generic line + fallback", () => {
+  assert.equal(
+    jobLinkFailureMessage(new Error("")),
+    "I couldn't read that link. Paste the job text instead, or use the company's own careers page link.",
+  );
+  assert.equal(
+    jobLinkFailureMessage(undefined),
+    "I couldn't read that link. Paste the job text instead, or use the company's own careers page link.",
+  );
+});
+
+test("a network failure on a link read keeps the generic line, no fake detail", () => {
+  const network = new TypeError("Failed to fetch");
+  assert.equal(
+    jobLinkFailureMessage(network),
+    "I couldn't read that link. Paste the job text instead, or use the company's own careers page link.",
+  );
+});
+
+test("a surfaced link-read error is truncated to 300 chars", () => {
+  const long = `x`.repeat(1000);
+  const message = jobLinkFailureMessage(new Error(long));
+  assert.match(message, new RegExp(`^I couldn't read that link: ${`x`.repeat(300)} Paste`));
+});
+
+test("readJobLink failure speaks through the dock only — no notice bar", () => {
+  const appSrc = fs.readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const body = appSrc.slice(appSrc.indexOf("async function readJobLink()"), appSrc.indexOf("function addSource(source)"));
+  assert.ok(body.length > 0, "readJobLink not found");
+  const catchBlock = body.slice(body.indexOf("} catch (error)"), body.indexOf("} finally"));
+  assert.ok(catchBlock.length > 0, "readJobLink catch not found");
+  assert.match(catchBlock, /say\(jobLinkFailureMessage\(error\)\)/);
+  assert.doesNotMatch(catchBlock, /setNotice/);
 });

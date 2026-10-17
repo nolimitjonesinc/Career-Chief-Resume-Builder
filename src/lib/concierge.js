@@ -38,9 +38,22 @@ export function conciergeAiFailureMessage(error) {
     : "AI couldn't answer that — here's what I can do from what you gave me.";
 }
 
-// ---------------------------------------------------------------------------
-// Stage: what the concierge is doing right now. Exactly one stage at a time.
-// ---------------------------------------------------------------------------
+// Message for a failed job-link read. Same safety rule as
+// conciergeAiFailureMessage: surface ONLY the server's error string,
+// truncated. A network failure has no server error to show, so it falls
+// back to the generic line. Blocked pages (Glassdoor/LinkedIn bot walls)
+// stay blocked — the fix is that the failure is visible in the dock,
+// not that the page gets read. The fallback is always plain words:
+// paste the text, or use the company's own careers page link.
+export function jobLinkFailureMessage(error) {
+  const name = error?.name || "";
+  const isServerError = error instanceof Error && name !== "SyntaxError" && name !== "TypeError";
+  const detail = isServerError ? String(error.message || "").trim().slice(0, 300) : "";
+  const fallback = "Paste the job text instead, or use the company's own careers page link.";
+  return detail
+    ? `I couldn't read that link: ${detail} ${fallback}`
+    : `I couldn't read that link. ${fallback}`;
+}
 
 export function conciergeStage(state = {}) {
   if (state.modal === "proposal") return "review";
