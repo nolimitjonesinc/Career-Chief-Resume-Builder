@@ -223,6 +223,153 @@ test("title-count guard: a search-count title never becomes a role, even on a pl
   assert.equal(out.job.role, "");
 });
 
+// ── Description: line breaks kept, Glassdoor metadata block stripped ──
+// The CACI pane Danny saved: the JobDetails_jobDescription element holds
+// a metadata block (Job Title, Job Category, Time Type, clearance, ...)
+// AHEAD of the real description. The description hint must hold the
+// description, not the block — while the evidence text keeps it all.
+const CACI_PANE_DESC = [
+  "Job Title: Staff AI/ML Engineer",
+  "Job Category: Science",
+  "Time Type: Full time",
+  "Minimum Clearance Required to Start: TS/SCI with Polygraph",
+  "Employee Type: Regular",
+  "Percentage of Travel Required: Up to 10%",
+  "Type of Travel: Local",
+  "Anticipated Posting End: 11/07/2026",
+  "",
+  "About the Role:",
+  "You will build AI agent systems for mission customers.",
+  "",
+  "What You'll Do:",
+  "Design, build, and deploy agentic workflows.",
+].join("\n");
+
+const CACI_META_LABELS = [
+  "Job Title:",
+  "Job Category:",
+  "Time Type:",
+  "Minimum Clearance Required to Start:",
+  "Employee Type:",
+  "Percentage of Travel Required:",
+  "Type of Travel:",
+  "Anticipated Posting End:",
+];
+
+test("pane description: metadata block stripped, paragraphs and line breaks kept", () => {
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "whole search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc({ description: CACI_PANE_DESC }),
+  });
+  assert.equal(out.job.role, "Staff AI/ML Engineer");
+  assert.equal(out.job.company, "CACI International");
+  for (const label of CACI_META_LABELS) {
+    assert.doesNotMatch(out.job.description, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(out.job.description, /About the Role:/);
+  assert.match(out.job.description, /You will build AI agent systems/);
+  assert.match(out.job.description, /What You'll Do:/);
+  assert.match(out.job.description, /\n/); // structure survived — not one run-on line
+  assert.doesNotMatch(out.job.description, /TS\/SCI with Polygraph/);
+});
+
+test("pane evidence text keeps the metadata (Analyze still sees clearance, travel)", () => {
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "whole search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc({ description: CACI_PANE_DESC }),
+  });
+  assert.match(out.text, /TS\/SCI with Polygraph/);
+  assert.match(out.text, /Percentage of Travel Required: Up to 10%/);
+  assert.match(out.text, /About the Role:/);
+  assert.match(out.text, /\n/);
+});
+
+test("pane description, run-together form: metadata stripped up to the body", () => {
+  const runTogether =
+    "Job Title: Staff AI/ML Engineer Job Category: Science Time Type: Full time " +
+    "Minimum Clearance Required to Start: TS/SCI with Polygraph Employee Type: Regular " +
+    "Percentage of Travel Required: Up to 10% Type of Travel: Local Anticipated Posting End: 11/07/2026 " +
+    "You will build AI agent systems for mission customers. Design, build, and deploy agentic workflows.";
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "whole search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc({ description: runTogether }),
+  });
+  // Every label except the last one is delimited by the next label and
+  // strips cleanly. The last run has no delimiter between its value and
+  // the body, so its line is kept rather than risk eating the body.
+  for (const label of CACI_META_LABELS.slice(0, -1)) {
+    assert.doesNotMatch(out.job.description, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.match(out.job.description, /You will build AI agent systems/);
+  assert.match(out.job.description, /Design, build, and deploy agentic workflows/);
+});
+
+test("pane description that is ONLY metadata falls back to the full text, never blank", () => {
+  const onlyMeta = "Job Title: Staff AI/ML Engineer\nJob Category: Science\nTime Type: Full time";
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "whole search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc({ description: onlyMeta }),
+  });
+  assert.match(out.job.description, /Job Title: Staff AI\/ML Engineer/);
+});
+
+test("body text that merely starts with a label word is kept, not eaten", () => {
+  const body =
+    "Salary: competitive pay for a senior engineer in this market, with annual " +
+    "bonus, equity, and a full benefits package that grows with tenure and performance. " +
+    "You will build AI agent systems for mission customers.";
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "whole search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc({ description: body }),
+  });
+  assert.match(out.job.description, /Salary: competitive pay/);
+  assert.match(out.job.description, /You will build AI agent systems/);
+});
+
+test("JSON-LD HTML description keeps paragraph breaks, not one run-on line", () => {
+  const ld = JSON.stringify({
+    "@type": "JobPosting",
+    title: "Senior Product Manager",
+    hiringOrganization: { name: "Nestwell" },
+    description:
+      "<p>Lead the roadmap for our home products.</p><p>You will own pricing and launches.</p><ul><li>Own the roadmap</li><li>Talk to customers</li></ul>",
+  });
+  const out = extractPageContent({
+    title: "Senior Product Manager",
+    innerText: "x",
+    jsonLdTexts: [ld],
+    url: "https://example.com/jobs/1",
+  });
+  assert.match(out.job.description, /Lead the roadmap for our home products\.\nYou will own pricing/);
+  assert.match(out.job.description, /Own the roadmap\nTalk to customers/);
+  assert.doesNotMatch(out.job.description, /<p>|<li>/);
+});
+
+test("fallback page text keeps line breaks", () => {
+  const out = extractPageContent({
+    title: "T",
+    innerText: "line one\n\nline two\nline three",
+    jsonLdTexts: [],
+    url: "https://example.com/1",
+  });
+  assert.equal(out.text, "line one\n\nline two\nline three");
+});
+
 test("single-job page: when several JobPosting blocks exist, the one matching the page title wins", () => {
   const ld = (title, company) =>
     JSON.stringify({ "@type": "JobPosting", title, hiringOrganization: { name: company }, description: "p".repeat(100) });

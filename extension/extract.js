@@ -33,15 +33,135 @@
       .replace(/&gt;/gi, ">");
   }
 
+  // Multi-line text (innerText / block HTML) keeps its line structure:
+  // collapse horizontal whitespace only, trim each line's edges, collapse
+  // 3+ newlines to 2, trim. Newlines are NEVER flattened into spaces —
+  // a description with structure must not arrive as one run-on line.
+  function normalizeMultilineText(value) {
+    return String(value || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/[ \t\u00a0]+/g, " ")
+      .replace(/^[ \t\u00a0]+|[ \t\u00a0]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, MAX_TEXT);
+  }
+
+  // Glassdoor's detail pane puts a metadata block AHEAD of the real
+  // description: "Job Title: ... Job Category: ... Time Type: ..." —
+  // leading "Label: value" runs whose labels are the pane's field names.
+  // The description hint must hold the actual description, not that block
+  // (Job Title also duplicates the role field). Only LEADING runs are
+  // stripped: once the text stops starting with a known label, the rest
+  // is the description, untouched. The labels below are the ones seen in
+  // Danny's CACI screenshot plus Glassdoor's sibling field names; the
+  // list errs short on purpose — a missed label leaves one metadata line
+  // in the description, while a wrongly-stripped body line loses content.
+  const METADATA_LABELS = [
+    "Minimum Clearance Required to Start",
+    "Percentage of Travel Required",
+    "Clearance Required to Start",
+    "Anticipated Posting End",
+    "Security Clearance",
+    "Travel Required",
+    "Job Category",
+    "Employee Type",
+    "Employment Type",
+    "Salary Range",
+    "Compensation",
+    "Requisition ID",
+    "Job Location",
+    "Work Location",
+    "Posting End",
+    "Posted Date",
+    "Date Posted",
+    "Job Title",
+    "Time Type",
+    "Job Type",
+    "Type of Travel",
+    "Location",
+    "Salary",
+    "Pay Range",
+    "Base Pay",
+    "Schedule",
+    "Shift",
+    "Work Type",
+    "Job ID",
+    "Req ID",
+    "Pay",
+  ];
+
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  // Longest first: "Minimum Clearance Required to Start" must win over
+  // "Clearance Required to Start" when both could match at one position.
+  const METADATA_ALT = [...METADATA_LABELS]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join("|");
+
+  // A metadata value is a short field ("Full time", "TS/SCI with
+  // Polygraph"). If the run to the next label / newline is longer than
+  // this, it is body text that merely starts with a label word — stop and
+  // keep it all. The final run (no next label, no newline) has no
+  // delimiter between the value and any following body, so it is only
+  // stripped when the whole remainder is short.
+  const METADATA_VALUE_MAX = 150;
+  const METADATA_FINAL_MAX = 60;
+
+  function stripLeadingMetadata(text) {
+    let rest = String(text || "");
+    for (let guard = 0; guard < 50; guard++) {
+      const trimmed = rest.replace(/^\s+/, "");
+      const m = trimmed.match(new RegExp(`^(?:${METADATA_ALT})\\s*:\\s*`, "i"));
+      if (!m) break;
+      const after = trimmed.slice(m[0].length);
+      // The value ends at the next metadata label, the next newline
+      // (line-separated form), or the end — whichever comes first.
+      let end = after.length;
+      let bounded = false;
+      const nl = after.indexOf("\n");
+      if (nl >= 0) {
+        end = Math.min(end, nl);
+        bounded = true;
+      }
+      const next = new RegExp(`\\s+(?:${METADATA_ALT})\\s*:`, "gi").exec(after);
+      if (next) {
+        end = Math.min(end, next.index);
+        bounded = true;
+      }
+      if (bounded ? end > METADATA_VALUE_MAX : after.length > METADATA_FINAL_MAX) break;
+      rest = after.slice(end);
+    }
+    return rest.replace(/^\s+/, "");
+  }
+
+  // The description hint is what fills the description box: normalized
+  // multi-line text with the pane's leading metadata block stripped. If
+  // stripping would leave nothing usable (the description WAS only
+  // metadata), fall back to the full text — never destroy the
+  // description trying to clean it.
+  function cleanDescriptionHint(raw) {
+    const normalized = normalizeMultilineText(raw);
+    const stripped = stripLeadingMetadata(normalized);
+    if (stripped.trim().length < 20) return normalized;
+    return stripped;
+  }
+
+  // HTML description (JSON-LD) keeps its block structure: block closers
+  // and <br> become newlines BEFORE tags are stripped, so paragraphs
+  // survive instead of collapsing into one run-on line. Tags are
+  // stripped before entities are decoded, so "&lt;div&gt;" in the source
+  // can never be mistaken for a real tag.
   function stripHtml(html) {
-    return decodeEntities(
-      String(html)
-        .replace(/<script[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/\s+/g, " ")
-        .trim(),
-    );
+    const withBreaks = String(html)
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<(?:br|hr)[^>]*>/gi, "\n")
+      .replace(/<\/(?:p|div|li|ul|ol|section|article|h[1-6]|tr|blockquote|pre)>/gi, "\n");
+    return normalizeMultilineText(decodeEntities(withBreaks.replace(/<[^>]+>/g, " ")));
   }
 
   // Never treat a job board's own name as the company: "Role | LinkedIn"
@@ -100,15 +220,17 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
         header.querySelector("h4");
       const company = cleanLabel(companyEl && companyEl.innerText);
       const descEl = doc.querySelector('[class*="JobDetails_jobDescription"]');
-      const description = descEl && typeof descEl.innerText === "string"
-        ? descEl.innerText.replace(/\s+/g, " ").trim().slice(0, MAX_TEXT)
-        : "";
-      const paneText = [header.innerText, descEl && descEl.innerText]
-        .filter((part) => typeof part === "string" && part.trim())
-        .join("\n")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, MAX_TEXT);
+      // The description HINT gets the metadata block stripped (its Job
+      // Title duplicates the role field) and keeps line breaks. The
+      // evidence text keeps the FULL pane, metadata included — Analyze
+      // still needs to see clearance, travel, etc.
+      const description =
+        descEl && typeof descEl.innerText === "string" ? cleanDescriptionHint(descEl.innerText) : "";
+      const paneText = normalizeMultilineText(
+        [header.innerText, descEl && descEl.innerText]
+          .filter((part) => typeof part === "string" && part.trim())
+          .join("\n"),
+      );
       return { role, company, description, text: paneText };
     } catch {
       return null;
@@ -179,7 +301,7 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
       const org = posting.hiringOrganization;
       hints.company = cleanLabel(typeof org === "string" ? org : org?.name);
       if (typeof posting.description === "string") {
-        hints.description = stripHtml(posting.description).slice(0, MAX_TEXT);
+        hints.description = cleanDescriptionHint(stripHtml(posting.description));
       }
     }
     if (!hints.role || !hints.company) {
@@ -212,12 +334,7 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
   function extractPageContent({ title, innerText, jsonLdTexts, url, doc }) {
     const pane = findViewedJob(doc, url);
     const hints = hintsFromInputs(jsonLdTexts, title, url, pane);
-    const text = pane
-      ? pane.text
-      : String(innerText || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, MAX_TEXT);
+    const text = pane ? pane.text : normalizeMultilineText(innerText);
     const payloadTitle =
       pane && pane.role
         ? cleanLabel(pane.company ? `${pane.role} at ${pane.company}` : pane.role)
