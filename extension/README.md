@@ -23,15 +23,24 @@ looking at it.
    (Glassdoor / LinkedIn / Indeed search with a job open in the detail
    pane), one click saves the job in the pane — the tab title describes
    the search, so it is never used as the role. If the page is a search
-   or listing with no single job in view, the role stays blank rather
-   than filling junk: open the single job posting and save it again.
+   or listing with no single job in view, NO source is added at all:
+   a search page's text is a list of other jobs, and adding it would
+   pollute the analysis. The dock says so — click the job you want,
+   then Save.
 2. Click the extension icon → **Save this job**.
 3. Career Chief opens in a new tab with the page saved as a job source.
    Role / company / description pre-fill only where the fields are empty
    — anything already typed stays untouched. Check them, fix anything
    that's off, then proceed as usual.
-4. A page with no readable text shows "This page has no readable text
+4. Saving the same job twice adds no second source — the dock says it
+   is already in your sources. Saving two different jobs from the same
+   search page adds both (they have different names).
+5. A page with no readable text shows "This page has no readable text
    to save." Nothing is sent anywhere in that case.
+6. Fresh installs show a note under the URL field while it still holds
+   the untouched production default — a fresh install resets the saved
+   URL, and Save then just opens the public site. Once any URL has been
+   saved, the note never appears again.
 
 ## What it sends, and when
 

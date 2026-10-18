@@ -27,7 +27,7 @@ import { looksLikeGap } from "../shared/gaps.mjs";
 import { exportResume } from "./lib/exporters";
 import { applyPreviewEdit } from "./lib/resume-view";
 import { applyJobHints } from "./lib/job-autofill";
-import { decodeImportFragment, stripImportFragment } from "./lib/extension-import";
+import { decodeImportFragment, isDuplicateSource, stripImportFragment, summarizeExtensionImport } from "./lib/extension-import";
 import { ResumePreview } from "./components/ResumePreview";
 import { ConciergeDock } from "./components/Concierge";
 import "./components/concierge.css";
@@ -207,15 +207,23 @@ export function App() {
       // Auto-fill, empty fields only: anything the user already typed stays
       // exactly as typed. Pre-filled values sit in the same visible, editable
       // fields — the user confirms them by seeing/editing them before Analyze
-      // ever uses them. The link is always added as evidence, filled or not.
+      // ever uses them. The link is added as evidence, filled or not,
+      // unless it is already in the sources (see the dedup below).
       const applied = applyJobHints(meta, jobText, result.job);
       if (applied.filled.length) {
         setMeta(applied.meta);
         setJobText(applied.jobText);
       }
-      addSource({ id: uid(), kind: "job", name: result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" });
+      // Same dedup as the extension import: reading the same link twice
+      // must not stack a second copy of the same source.
+      const linkSource = { kind: "job", name: result.title, origin: `Public link · read ${new Date(result.fetchedAt).toLocaleDateString()}`, url: result.url, text: result.text, status: "ready" };
+      if (isDuplicateSource(sources, linkSource)) {
+        setNotice("That page is already in your sources — nothing new to add.");
+      } else {
+        addSource(linkSource);
+        setNotice(applied.filled.length ? `Read the page and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.` : "The public page was read and added as job evidence.");
+      }
       setJobUrl("");
-      setNotice(applied.filled.length ? `Read the page and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.` : "The public page was read and added as job evidence.");
     } catch (error) {
       // The dock is the single driver: a failed link read speaks through
       // the dock, never the thin notice bar (which the user never saw).
@@ -429,27 +437,16 @@ export function App() {
       return;
     }
     window.history.replaceState(null, "", stripImportFragment(window.location.href));
-    const applied = applyJobHints(meta, jobText, payload.job);
-    if (applied.filled.length) {
-      setMeta(applied.meta);
-      setJobText(applied.jobText);
+    // The decision (fills, source, dock message) lives in
+    // summarizeExtensionImport so the whole flow is unit-testable. This
+    // effect only applies it: fills, then source, then the message.
+    const result = summarizeExtensionImport(payload, { meta, jobText, sources });
+    if (!result.skipped && result.applied.filled.length) {
+      setMeta(result.applied.meta);
+      setJobText(result.applied.jobText);
     }
-    addSource({ id: uid(), kind: "job", name: payload.title || payload.url, origin: `Saved from browser · ${new Date().toLocaleDateString()}`, url: payload.url, text: payload.text, status: "ready" });
-    // Never claim a fill that did not happen: when the saved page yielded
-    // no usable role/company AND the fields are still blank, say so and
-    // point at the next step (open the single job posting) instead of
-    // implying the role was filled. When the user already typed the
-    // fields, the plain "as job evidence" line is the honest one.
-    const hintsBlank =
-      !payload.job?.role?.trim() &&
-      !payload.job?.company?.trim() &&
-      !(typeof payload.job?.description === "string" && payload.job.description.length >= 80);
-    const fieldsBlank = !meta?.role?.trim() && !meta?.company?.trim() && !jobText?.trim();
-    say(applied.filled.length
-      ? `Saved "${payload.title || payload.url}" from your browser and filled in the ${applied.filled.join(", ")}. Check them and fix anything that's off.`
-      : hintsBlank && fieldsBlank
-        ? `Saved "${payload.title || payload.url}" from your browser as job evidence. No role or company came with it — this looks like a search or listing page. Open the single job posting and save it again, or type the role in.`
-        : `Saved "${payload.title || payload.url}" from your browser as job evidence.`);
+    if (result.source) addSource({ id: uid(), ...result.source });
+    say(result.message);
   }, []);
 
   // The guided focus ring: exactly one element wears .concierge-focus at a

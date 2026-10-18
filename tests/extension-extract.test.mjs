@@ -382,3 +382,117 @@ test("single-job page: when several JobPosting blocks exist, the one matching th
   assert.equal(out.job.role, "Staff AI/ML Engineer");
   assert.equal(out.job.company, "CACI International");
 });
+
+// ── Payload flags the search-page case for the app ────────────────────────
+
+test("payload flags searchPage only for search/listing pages with no pane", () => {
+  const searchNoPane = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: { querySelector: () => null },
+  });
+  assert.equal(searchNoPane.searchPage, true);
+  const searchWithPane = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: glassdoorDoc(),
+  });
+  assert.equal(searchWithPane.searchPage, false);
+  const single = extractPageContent({
+    title: "Staff AI/ML Engineer",
+    innerText: "x",
+    jsonLdTexts: [],
+    url: "https://www.glassdoor.com/job-listing/staff-ai-ml-engineer-caci-international-JV_IC123.htm",
+  });
+  assert.equal(single.searchPage, false);
+});
+
+// ── Multiple pane headers: the VISIBLE one wins ───────────────────────────
+// The real Glassdoor search page carries TWO pane headers for the same job
+// (pane + sticky header); a stale hidden pane for a previously viewed job
+// is possible. Elements report visibility via getClientRects; elements
+// without layout info (older fakes) count as visible.
+function visEl(innerText, children = {}, visible = true) {
+  return {
+    innerText,
+    querySelector: (sel) => children[sel] || null,
+    getClientRects: () => (visible ? [{}] : []),
+  };
+}
+
+function multiHeaderDoc(headers, descs = []) {
+  const bySelector = {
+    'header[data-test="job-details-header"]': headers,
+    '[class*="JobDetails_jobDetailsHeaderWrapper"]': [],
+    '[class*="JobDetails_jobDescription"]': descs,
+  };
+  return {
+    querySelector: (sel) => (bySelector[sel] || [])[0] || null,
+    querySelectorAll: (sel) => [...(bySelector[sel] || [])],
+  };
+}
+
+function paneHeader(role, company, visible = true) {
+  return visEl(
+    `${company}\n${role}`,
+    {
+      'h1[id^="jd-job-title-"]': visEl(role, {}, visible),
+      h1: visEl(role, {}, visible),
+      '[class*="EmployerProfile_employerNameHeading"] h4': visEl(company, {}, visible),
+      h4: visEl(company, {}, visible),
+    },
+    visible,
+  );
+}
+
+test("hidden stale header + visible current header: the visible job wins", () => {
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: multiHeaderDoc([
+      paneHeader("Stale Old Job", "Stale Co", false),
+      paneHeader("Staff AI/ML Engineer", "CACI International", true),
+    ]),
+  });
+  assert.equal(out.job.role, "Staff AI/ML Engineer");
+  assert.equal(out.job.company, "CACI International");
+});
+
+test("all headers hidden: first header with a role wins (fallback, never nothing)", () => {
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: multiHeaderDoc([
+      paneHeader("Stale Old Job", "Stale Co", false),
+      paneHeader("Staff AI/ML Engineer", "CACI International", false),
+    ]),
+  });
+  assert.equal(out.job.role, "Stale Old Job");
+});
+
+test("hidden description + visible description: the visible description wins", () => {
+  const desc = (text, visible) => visEl(text, {}, visible);
+  const out = extractPageContent({
+    title: GD_SEARCH_TITLE,
+    innerText: "search page text",
+    jsonLdTexts: [],
+    url: GD_SEARCH_URL,
+    doc: multiHeaderDoc(
+      [paneHeader("Staff AI/ML Engineer", "CACI International", true)],
+      [
+        desc("Hidden stale description text that is long enough to pass every length gate in the pipeline.", false),
+        desc("Visible current description text that is long enough to pass every length gate in the pipeline.", true),
+      ],
+    ),
+  });
+  assert.match(out.job.description, /Visible current description/);
+  assert.doesNotMatch(out.job.description, /Hidden stale/);
+});

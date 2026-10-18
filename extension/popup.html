@@ -9,6 +9,7 @@
       p { font-size: 12px; color: #444; margin: 0 0 10px; line-height: 1.4; }
       label { font-size: 12px; font-weight: 600; }
       input { width: 100%; box-sizing: border-box; margin: 4px 0 10px; padding: 7px; font-size: 13px; }
+      #default-note { color: #7a5b00; }
       button { width: 100%; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
       button:disabled { opacity: 0.6; cursor: default; }
       #status { font-size: 12px; margin-top: 10px; min-height: 16px; }
@@ -19,6 +20,10 @@
     <p>Click Save while viewing any job page. The page text is sent to Career Chief only — nowhere else, and only on this click.</p>
     <label for="url">Career Chief URL</label>
     <input id="url" type="text" spellcheck="false" placeholder="https://careerchief.ai/" />
+    <!-- Shown only while the URL is still the untouched production default:
+         a fresh install resets the saved URL, and Save then just opens the
+         public site. Once the user has saved any URL, this never appears. -->
+    <p id="default-note" hidden>This opens the public site. If you're testing a preview build, paste its link above.</p>
     <button id="save" type="button">Save this job</button>
     <div id="status" role="status"></div>
     <script src="popup.js"></script>

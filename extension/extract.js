@@ -185,6 +185,33 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
     return false;
   }
 
+  // Prefer VISIBLE elements. A split-view page can carry more than one
+  // pane header in the DOM — the real Glassdoor search page carries TWO
+  // headers for the same job (the pane header + a sticky header), and a
+  // stale hidden pane for a previously viewed job is possible. First-match
+  // selection could pick a hidden/stale one. Elements that affirmatively
+  // report no layout boxes are hidden; elements without layout info
+  // (test fakes) count as visible so the fallback stays first-match.
+  function isVisible(el) {
+    if (!el || typeof el !== "object") return false;
+    if (typeof el.getClientRects === "function") return el.getClientRects().length > 0;
+    if ("offsetParent" in el) return el.offsetParent !== null;
+    return true;
+  }
+
+  function queryAll(doc, sel) {
+    try {
+      if (doc && typeof doc.querySelectorAll === "function") return Array.from(doc.querySelectorAll(sel));
+      if (doc && typeof doc.querySelector === "function") {
+        const one = doc.querySelector(sel);
+        return one ? [one] : [];
+      }
+    } catch {
+      /* selector unsupported: no candidates */
+    }
+    return [];
+  }
+
   // The job the user is VIEWING, not the page title. On split-view pages
   // (Glassdoor / LinkedIn / Indeed search) the tab title describes the
   // SEARCH, while the selected job's detail pane sits in the DOM. The pane
@@ -207,19 +234,45 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
       if (!doc || typeof doc.querySelector !== "function") return null;
       const host = new URL(url).hostname.toLowerCase();
       if (!host.includes("glassdoor")) return null;
-      const header =
-        doc.querySelector('header[data-test="job-details-header"]') ||
-        doc.querySelector('[class*="JobDetails_jobDetailsHeaderWrapper"]');
-      if (!header || typeof header.querySelector !== "function") return null;
-      const titleEl =
-        header.querySelector('h1[id^="jd-job-title-"]') || header.querySelector("h1");
-      const role = cleanLabel(titleEl && titleEl.innerText);
-      if (!role) return null;
+      // Both header selectors can match several elements (pane + sticky
+      // header). Prefer a VISIBLE header that yields a role; fall back to
+      // any header that yields one.
+      const headerCandidates = [];
+      for (const el of [
+        ...queryAll(doc, 'header[data-test="job-details-header"]'),
+        ...queryAll(doc, '[class*="JobDetails_jobDetailsHeaderWrapper"]'),
+      ]) {
+        if (el && !headerCandidates.includes(el)) headerCandidates.push(el);
+      }
+      const orderedHeaders = [
+        ...headerCandidates.filter(isVisible),
+        ...headerCandidates.filter((el) => !isVisible(el)),
+      ];
+      let header = null;
+      let role = "";
+      for (const candidate of orderedHeaders) {
+        if (!candidate || typeof candidate.querySelector !== "function") continue;
+        const titleEl =
+          candidate.querySelector('h1[id^="jd-job-title-"]') || candidate.querySelector("h1");
+        const candidateRole = cleanLabel(titleEl && titleEl.innerText);
+        if (candidateRole) {
+          header = candidate;
+          role = candidateRole;
+          break;
+        }
+      }
+      if (!header) return null;
       const companyEl =
         header.querySelector('[class*="EmployerProfile_employerNameHeading"] h4') ||
         header.querySelector("h4");
       const company = cleanLabel(companyEl && companyEl.innerText);
-      const descEl = doc.querySelector('[class*="JobDetails_jobDescription"]');
+      // Same visibility preference for the description element.
+      const descCandidates = queryAll(doc, '[class*="JobDetails_jobDescription"]');
+      const withText = descCandidates.filter(
+        (el) => typeof el?.innerText === "string" && el.innerText.trim(),
+      );
+      const orderedDesc = [...withText.filter(isVisible), ...withText.filter((el) => !isVisible(el))];
+      const descEl = orderedDesc[0] || null;
       // The description HINT gets the metadata block stripped (its Job
       // Title duplicates the role field) and keeps line breaks. The
       // evidence text keeps the FULL pane, metadata included — Analyze
@@ -328,9 +381,11 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
   // Plain-data in, payload out. `innerText` is the page's visible text;
   // it becomes the evidence source, NOT the job-description field — except
   // when a detail pane was found, in which case the PANE text is the
-  // evidence (the viewed job, not the whole search page). `doc` is the
-  // live document (content script) or a fake in tests; omit it when the
-  // caller has no DOM.
+  // evidence (the viewed job, not the whole search page). `searchPage`
+  // tells the app this was a search/listing page with NO viewed job, so
+  // the app can skip adding a junk source for it instead of trusting the
+  // (blank) hints alone. `doc` is the live document (content script) or
+  // a fake in tests; omit it when the caller has no DOM.
   function extractPageContent({ title, innerText, jsonLdTexts, url, doc }) {
     const pane = findViewedJob(doc, url);
     const hints = hintsFromInputs(jsonLdTexts, title, url, pane);
@@ -344,6 +399,7 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
       text,
       url: typeof url === "string" ? url : "",
       job: hints,
+      searchPage: !pane && isSearchPage({ title, url }),
     };
   }
 
