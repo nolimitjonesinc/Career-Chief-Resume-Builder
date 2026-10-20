@@ -50,12 +50,16 @@ button.addEventListener("click", async () => {
       return;
     }
   }
-  // Ask once, for this one site, so a save can find and reuse the open tab.
-  // Declining only means a new tab opens each time.
+  // The live site's access is built into the manifest, so it never prompts
+  // (a prompt can close this popup and drop the save). Any other address is
+  // asked for once, so a save can find and reuse the open tab. Declining
+  // only means a new tab opens each time.
   try {
     const site = new URL(normalized);
     const bare = site.hostname.replace(/^www\./, "");
-    await chrome.permissions.request({ origins: [`${site.protocol}//${bare}/*`, `${site.protocol}//www.${bare}/*`] });
+    if (bare !== "careerchief.ai") {
+      await chrome.permissions.request({ origins: [`${site.protocol}//${bare}/*`, `${site.protocol}//www.${bare}/*`] });
+    }
   } catch {
     // Not granted: saving still works, it just opens a new tab.
   }

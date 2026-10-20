@@ -531,3 +531,32 @@ test("LinkedIn search page with no open job pane is still treated as a search pa
   assert.equal(out.searchPage, true);
   assert.equal(out.job.role, "");
 });
+
+// LinkedIn's single-job page (/jobs/view/…) has scrambled class names.
+// Shape checked live 2026-10-20: tab title "Role | Company | LinkedIn", the
+// description in a data-testid="expandable-text-box" under an "About the
+// job" heading, and a second such box ("About the company") further down.
+test("LinkedIn single-job page: role and company from the tab title, description under 'About the job'", () => {
+  const descBox = fakeEl("Product Manager – Automotive Aftermarket\n\nPensacola, FL | Full-Time | On-Site\n\nHolstein Parts is a fast-growing automotive aftermarket supplier.");
+  const section = { querySelector: (sel) => (sel === '[data-testid="expandable-text-box"]' ? descBox : null), parentElement: null };
+  const headingWrap = { querySelector: () => null, parentElement: section };
+  const heading = { innerText: "About the job", querySelector: () => null, parentElement: headingWrap };
+  const other = { innerText: "About the company", querySelector: () => null, parentElement: null };
+  const doc = {
+    title: "(1) Product Manager – Automotive Aftermarket | Holstein Parts | LinkedIn",
+    querySelector: () => null,
+    querySelectorAll: (sel) => (sel === "h2" ? [other, heading] : []),
+  };
+  const out = extractPageContent({
+    title: doc.title,
+    innerText: "whole page noise",
+    jsonLdTexts: [],
+    url: "https://www.linkedin.com/jobs/view/4416907073/",
+    doc,
+  });
+  assert.equal(out.searchPage, false);
+  assert.equal(out.job.role, "Product Manager – Automotive Aftermarket");
+  assert.equal(out.job.company, "Holstein Parts");
+  assert.match(out.job.description, /fast-growing automotive aftermarket supplier/);
+  assert.doesNotMatch(out.text, /whole page noise/);
+});

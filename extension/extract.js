@@ -303,7 +303,7 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
     };
     const titleEl = pick('[class*="job-details-jobs-unified-top-card__job-title"]');
     const role = cleanLabel(titleEl && titleEl.innerText);
-    if (!role) return null;
+    if (!role) return findLinkedInJobPage(doc);
     const companyEl = pick('[class*="job-details-jobs-unified-top-card__company-name"]');
     const company = cleanLabel(companyEl && companyEl.innerText);
     const descEl = pick("#job-details") || pick('[class*="jobs-description__content"]');
@@ -312,6 +312,29 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
     const text = normalizeMultilineText(
       [company, role, rawDescription].filter((part) => typeof part === "string" && part.trim()).join("\n"),
     );
+    return { role, company, description, text };
+  }
+
+  // LinkedIn's single-job page (/jobs/view/…), checked live 2026-10-20: its
+  // class names are scrambled, so the role and company come from the tab
+  // title ("Role | Company | LinkedIn", split on pipes only: roles contain
+  // dashes) and the description from the text box under "About the job".
+  function findLinkedInJobPage(doc) {
+    const parts = String(doc.title || "")
+      .replace(/^\(\d+\)\s*/, "")
+      .split(/\s+\|\s+/)
+      .map(cleanLabel)
+      .filter(Boolean);
+    if (parts.length < 3 || !/^linkedin$/i.test(parts[parts.length - 1])) return null;
+    const [role, company] = parts;
+    const heading = queryAll(doc, "h2").find((el) => /^\s*About the job\s*$/i.test(el.innerText || ""));
+    let descEl = null;
+    for (let node = heading, depth = 0; node && !descEl && depth < 8; node = node.parentElement, depth++) {
+      descEl = typeof node.querySelector === "function" ? node.querySelector('[data-testid="expandable-text-box"]') : null;
+    }
+    const rawDescription = descEl && typeof descEl.innerText === "string" ? descEl.innerText : "";
+    const description = rawDescription ? cleanDescriptionHint(rawDescription) : "";
+    const text = normalizeMultilineText([company, role, rawDescription].filter(Boolean).join("\n"));
     return { role, company, description, text };
   }
 
