@@ -496,3 +496,38 @@ test("hidden description + visible description: the visible description wins", (
   assert.match(out.job.description, /Visible current description/);
   assert.doesNotMatch(out.job.description, /Hidden stale/);
 });
+
+// LinkedIn's open job (split-view search). Selector prefixes were checked
+// against a live, logged-in LinkedIn job page on 2026-10-20.
+test("LinkedIn split-view search page: the open job is read from its detail pane", () => {
+  const els = {
+    '[class*="job-details-jobs-unified-top-card__job-title"]': fakeEl("AI Agent Engineer - US Remote "),
+    '[class*="job-details-jobs-unified-top-card__company-name"]': fakeEl("TRM Labs"),
+    "#job-details": fakeEl("About the job\n\nBuild a Safer World.\n\nTRM Labs provides AI-powered blockchain intelligence for teams that investigate financial crime."),
+  };
+  const out = extractPageContent({
+    title: "(21) AI Agent Engineer TRM Labs Jobs in United States | LinkedIn",
+    innerText: "search page noise",
+    jsonLdTexts: [],
+    url: "https://www.linkedin.com/jobs/search/?currentJobId=4389951823&keywords=AI%20Agent%20Engineer",
+    doc: { querySelector: (sel) => els[sel] || null },
+  });
+  assert.equal(out.searchPage, false);
+  assert.equal(out.job.role, "AI Agent Engineer - US Remote");
+  assert.equal(out.job.company, "TRM Labs");
+  assert.match(out.job.description, /^Build a Safer World/);
+  assert.match(out.text, /TRM Labs/);
+  assert.doesNotMatch(out.text, /search page noise/);
+});
+
+test("LinkedIn search page with no open job pane is still treated as a search page", () => {
+  const out = extractPageContent({
+    title: "20,791 Ai agent engineer jobs in United States | LinkedIn",
+    innerText: "a list of many jobs",
+    jsonLdTexts: [],
+    url: "https://www.linkedin.com/jobs/search/?keywords=ai%20agent",
+    doc: { querySelector: () => null },
+  });
+  assert.equal(out.searchPage, true);
+  assert.equal(out.job.role, "");
+});

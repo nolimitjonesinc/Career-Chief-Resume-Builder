@@ -233,6 +233,7 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
     try {
       if (!doc || typeof doc.querySelector !== "function") return null;
       const host = new URL(url).hostname.toLowerCase();
+      if (host.includes("linkedin")) return findLinkedInJob(doc);
       if (!host.includes("glassdoor")) return null;
       // Both header selectors can match several elements (pane + sticky
       // header). Prefer a VISIBLE header that yields a role; fall back to
@@ -288,6 +289,30 @@ const SEARCH_URL = /(?:SRCH|[/]jobs[/]search|[/]jobs[/]collections|[/]jobs[?].*(
     } catch {
       return null;
     }
+  }
+
+  // LinkedIn's open job (split-view search or a single job page). Checked
+  // against a live, logged-in LinkedIn job page on 2026-10-20: the detail
+  // pane carries a top-card title, a top-card company name, and the full
+  // description in #job-details. Only stable class PREFIXES are matched.
+  // No pane found means null, and the page is then judged by its address.
+  function findLinkedInJob(doc) {
+    const pick = (sel) => {
+      const els = queryAll(doc, sel);
+      return [...els.filter(isVisible), ...els.filter((el) => !isVisible(el))][0] || null;
+    };
+    const titleEl = pick('[class*="job-details-jobs-unified-top-card__job-title"]');
+    const role = cleanLabel(titleEl && titleEl.innerText);
+    if (!role) return null;
+    const companyEl = pick('[class*="job-details-jobs-unified-top-card__company-name"]');
+    const company = cleanLabel(companyEl && companyEl.innerText);
+    const descEl = pick("#job-details") || pick('[class*="jobs-description__content"]');
+    const rawDescription = descEl && typeof descEl.innerText === "string" ? descEl.innerText : "";
+    const description = cleanDescriptionHint(rawDescription.replace(/^\s*About the job\s*/i, ""));
+    const text = normalizeMultilineText(
+      [company, role, rawDescription].filter((part) => typeof part === "string" && part.trim()).join("\n"),
+    );
+    return { role, company, description, text };
   }
 
   function collectJobPostings(node, out) {

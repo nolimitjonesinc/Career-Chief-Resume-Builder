@@ -446,6 +446,9 @@ export function App() {
       say("That saved page couldn't be read. Try saving it again from the job page, or paste the job text instead.");
       return;
     }
+    // A save always opens the dock so its message (including a "that was a
+    // search page" explanation) can never go unseen behind a collapsed bar.
+    setConciergeCollapsed(false);
     const last = lastImport.current;
     const replace = Boolean(last) && !analysis && meta.role === last.role && meta.company === last.company && jobText === last.jobText;
     const keptSources = replace ? sources.filter((item) => item.id !== last.sourceId) : sources;
