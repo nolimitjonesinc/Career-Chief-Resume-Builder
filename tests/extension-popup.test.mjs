@@ -43,11 +43,13 @@ test("fresh install (untouched production default): the warning note shows", () 
   assert.equal(elements["default-note"].hidden, false);
 });
 
-test("preview URL already saved: no note", () => {
-  const { elements } = loadPopup({
+test("a stale saved preview address is reset to the live site, with no note", () => {
+  const { elements, storage } = loadPopup({
     careerChiefUrl: "https://careerchiefresumebuilder-abc-nolimitjonesincs-projects.vercel.app/",
     careerChiefUrlSet: true,
   });
+  assert.equal(elements.url.value, DEFAULT_URL);
+  assert.equal(storage.careerChiefUrl, DEFAULT_URL);
   assert.equal(elements["default-note"].hidden, true);
 });
 

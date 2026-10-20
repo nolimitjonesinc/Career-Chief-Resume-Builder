@@ -443,12 +443,10 @@ export function App() {
     const payload = decodeImportFragment(window.location.hash);
     window.history.replaceState(null, "", stripImportFragment(window.location.href));
     if (!payload) {
+      setConciergeCollapsed(false);
       say("That saved page couldn't be read. Try saving it again from the job page, or paste the job text instead.");
       return;
     }
-    // A save always opens the dock so its message (including a "that was a
-    // search page" explanation) can never go unseen behind a collapsed bar.
-    setConciergeCollapsed(false);
     const last = lastImport.current;
     const replace = Boolean(last) && !analysis && meta.role === last.role && meta.company === last.company && jobText === last.jobText;
     const keptSources = replace ? sources.filter((item) => item.id !== last.sourceId) : sources;
@@ -456,6 +454,9 @@ export function App() {
     // summarizeExtensionImport so the whole flow is unit-testable. This
     // only applies it: fills, then source, then the message.
     const result = summarizeExtensionImport(payload, replace ? { meta: { company: "", role: "" }, jobText: "", sources: keptSources } : { meta, jobText, sources });
+    // A good save is its own feedback (the form fills in), so the chat bar stays
+    // out of the way. Only a save that filled nothing opens it, so the reason is seen.
+    if (result.skipped || !result.applied.filled.length) setConciergeCollapsed(false);
     if (result.skipped) { say(result.message); return; }
     if (replace || result.applied.filled.length) {
       setMeta(result.applied.meta);

@@ -17,6 +17,21 @@ const note = document.getElementById("default-note");
 chrome.storage.local.get(
   { careerChiefUrl: DEFAULT_URL, careerChiefUrlSet: false },
   ({ careerChiefUrl, careerChiefUrlSet }) => {
+    // A saved test-preview address goes stale the moment a newer build ships,
+    // and then every save lands on an old copy of the site. Reset it to the
+    // live site. (Typing a preview address yourself still works until the
+    // popup is next opened.)
+    let host = "";
+    try {
+      host = new URL(careerChiefUrl).hostname;
+    } catch {
+      host = "";
+    }
+    if (host.endsWith(".vercel.app")) {
+      careerChiefUrl = DEFAULT_URL;
+      careerChiefUrlSet = true;
+      chrome.storage.local.set({ careerChiefUrl: DEFAULT_URL, careerChiefUrlSet: true });
+    }
     input.value = careerChiefUrl;
     if (!careerChiefUrlSet && careerChiefUrl === DEFAULT_URL) note.hidden = false;
   },
