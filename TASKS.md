@@ -9,6 +9,9 @@ Everything below comes from the documented gaps in `PROJECT.md` section 8 and th
 production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 
 ## Next up
+- [ ] **Oct 20: look at the new sample dropdown in a browser** (computer and phone size, and the guided tour opening it). Built and compiled, not yet seen, not committed. Untracked logo files and a deleted old logo are also sitting uncommitted
+- [ ] **Oct 20: extension tested by hand by Danny.** Company and role fill; the full posting goes in the Opportunity box. Run Analyze with a real resume to confirm the posting is split properly (it hadn't run: resume box was empty). ‹CHECK› the "Save to Career Chief" extension is not listed anywhere else in this file
+- [ ] **Oct 20: second saved job doesn't replace the first** in the form (extension only fills empty boxes). Decide: replace, or ask first
 - [ ] **Click through the merged branch (Oct 16):** main was merged into `feature/job-link-autofill` locally (not pushed). Build passes; 259 of 260 tests pass. The one failure is a PDF layout test that needs a newer Node than this computer's 20 ‹CHECK› that it also fails on main. Then try chat mode with a real resume and job
 - [ ] **Make tailoring visible:** a finished resume looked untailored. Free mode only reorders bullets; answers still go in nearly word for word. Add a "what we changed for this job" before/after panel and job-specific rewording ‹CHECK› Danny to confirm before building
 - [ ] **Decide on `henry/concierge-rebuild`** (chat dock that guides the whole flow, not on main) — merge, or leave

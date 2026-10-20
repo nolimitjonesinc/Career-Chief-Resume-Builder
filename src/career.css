@@ -86,3 +86,4 @@ label>input,label>textarea,label>select{margin-top:8px}
 .chat-input-row .primary{white-space:nowrap}
 .chat-form .quiet{display:flex;align-items:center;gap:5px;margin-top:8px}
 .proposal-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.sample-drop{margin-top:14px}.sample-drop summary{cursor:pointer;color:var(--green);font-weight:700;font-size:14px;padding:6px 0}.sample-drop[open] summary{margin-bottom:6px}
