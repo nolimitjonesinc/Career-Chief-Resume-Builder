@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Save to Career Chief</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 14px; width: 300px; }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      p { font-size: 12px; color: #444; margin: 0 0 10px; line-height: 1.4; }
+      label { font-size: 12px; font-weight: 600; }
+      input { width: 100%; box-sizing: border-box; margin: 4px 0 10px; padding: 7px; font-size: 13px; }
+      button { width: 100%; padding: 9px; font-size: 13px; font-weight: 600; cursor: pointer; }
+      button:disabled { opacity: 0.6; cursor: default; }
+      #status { font-size: 12px; margin-top: 10px; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Save to Career Chief</h1>
+    <p>Click Save while viewing any job page. The page text is sent to Career Chief only — nowhere else, and only on this click.</p>
+    <label for="url">Career Chief URL</label>
+    <input id="url" type="text" spellcheck="false" placeholder="https://careerchief.ai/" />
+    <button id="save" type="button">Save this job</button>
+    <div id="status" role="status"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>
