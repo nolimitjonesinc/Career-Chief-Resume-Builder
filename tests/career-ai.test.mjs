@@ -214,7 +214,7 @@ test("Claude path: research cites real URLs, uses Haiku, sends the key as a head
   assert.equal(result.research[0].url, "https://example.com/news");
   assert.equal(calls[0].url, "https://api.anthropic.com/v1/messages");
   assert.equal(calls[0].headers["x-api-key"], "test-claude-key");
-  assert.equal(calls[0].body.model, "claude-haiku-4-5");
+  assert.equal(calls[0].body.model, "claude-haiku-5-5");
   assert.equal(calls[0].body.tools[0].type, "web_search_20250305");
   assert.equal(calls[1].body.tools, undefined);
 });

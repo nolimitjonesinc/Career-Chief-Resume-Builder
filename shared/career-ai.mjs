@@ -32,7 +32,7 @@ const RESEARCH_FALLBACK = "gpt-5.5";
 // Claude path. One model does all three jobs. Haiku 4.5 is the cheapest Claude
 // that supports web search; override with CAREER_AI_CLAUDE_MODEL to retune.
 const CLAUDE_API = "https://api.anthropic.com/v1/messages";
-const CLAUDE_MODEL = envValue("CAREER_AI_CLAUDE_MODEL") || "claude-haiku-4-5";
+const CLAUDE_MODEL = envValue("CAREER_AI_CLAUDE_MODEL") || "claude-haiku-5-5";
 
 // Which provider answers. A Claude key wins when both are present, unless the
 // operator sets CAREER_AI_PROVIDER=openai (and an OpenAI key exists).
@@ -151,6 +151,8 @@ async function askClaude(body, key, fetchImpl, maxBytes = aiLimits().maxResponse
   const timeout = setTimeout(() => controller.abort(), 90_000);
   const request = {
     model: CLAUDE_MODEL, max_tokens: 6000, system: body.instructions,
+    // Haiku 5.5 thinks by default; keep the old no-thinking behavior
+    ...(CLAUDE_MODEL.startsWith("claude-haiku-5") ? { thinking: { type: "disabled" } } : {}),
     ...(body.tools ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }] } : {}),
   };
   const messages = [{ role: "user", content: body.input }];
