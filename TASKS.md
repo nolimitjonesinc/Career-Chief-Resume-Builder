@@ -1,6 +1,6 @@
 # Career Chief — Tasks
 
-**Last updated:** October 6, 2026
+**Last updated:** October 20, 2026
 
 Read `PROJECT.md` before adding anything here. Tasks that break a "Rule of the
 house" don't belong on this list.
@@ -9,6 +9,8 @@ Everything below comes from the documented gaps in `PROJECT.md` section 8 and th
 production acceptance criteria in `PROTOTYPE.md`. Nothing here is invented.
 
 ## Next up
+- [ ] **Oct 20: test the combined version by hand** (merged to main Oct 20). The two lines of work (the extension branch and the job-link branch) were joined: extension catches saved jobs, a second save replaces the first and reuses the open Career Chief tab, uploaded resume lands in the Resume box, chat bar starts collapsed, sample example is a dropdown, Haiku 5.5 switch, logos and extension icon. Reload the extension in Chrome and point it at the site once. ‹CHECK› the tab-reuse permission prompt in a real Chrome (only the saved-job replace and the page were tested in a browser; the extension's own tab lookup was not)
+- [ ] Old branch `feature/job-link-autofill` is superseded by this merge. ‹CHECK› retire it and the other leftover branches once Danny confirms
 - [ ] **Commit the starter-resume form** (built Oct 6, 2026, uncommitted), then try the full flow once with a real job posting and a form-built resume (Analyze step only unit-tested so far). ‹CHECK› whether a form-built resume with only one job reads well in the finished document
 - [ ] **Review and test branch `feature/trust-and-evidence`** (see `PLAN.md`, `IMPROVEMENTS.md`), then merge or send back notes. Rules 15 and 16 in `PROJECT.md` are proposed there and marked ‹CHECK›
 - [ ] **Before a key touches a public URL:** bind a shared store as `env.AI_LIMIT_STORE` (Workers KV or a Durable Object) so the daily cap is a real cap. The interface exists; no adapter is written

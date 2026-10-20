@@ -34,8 +34,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       const url = new URL(normalizeBase(careerChiefUrl));
       url.hash = `import=${self.CareerChiefExtract.encodeImportPayload(page)}`;
-      await chrome.tabs.create({ url: url.href });
-      sendResponse({ ok: true });
+      // Reuse the Career Chief tab that is already open (the page listens for
+      // the new fragment), so a save never piles up extra tabs. Without the
+      // site permission the lookup finds nothing and we open a new tab.
+      let reused = false;
+      try {
+        const open = await chrome.tabs.query({ url: `${url.protocol}//${url.hostname}/*` });
+        const existing = open.find((candidate) => candidate.id !== tab.id);
+        if (existing) {
+          await chrome.tabs.update(existing.id, { url: url.href, active: true });
+          await chrome.windows.update(existing.windowId, { focused: true });
+          reused = true;
+        }
+      } catch {
+        reused = false;
+      }
+      if (!reused) await chrome.tabs.create({ url: url.href });
+      sendResponse({ ok: true, reused });
     } catch (error) {
       sendResponse({ ok: false, error: error?.message || "Could not save this page." });
     }

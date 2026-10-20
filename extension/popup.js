@@ -35,6 +35,14 @@ button.addEventListener("click", async () => {
       return;
     }
   }
+  // Ask once, for this one site, so a save can find and reuse the open tab.
+  // Declining only means a new tab opens each time.
+  try {
+    const site = new URL(normalized);
+    await chrome.permissions.request({ origins: [`${site.protocol}//${site.hostname}/*`] });
+  } catch {
+    // Not granted: saving still works, it just opens a new tab.
+  }
   await chrome.storage.local.set({ careerChiefUrl: normalized, careerChiefUrlSet: true });
   input.value = normalized;
   status.textContent = "Saving…";
@@ -42,7 +50,7 @@ button.addEventListener("click", async () => {
   try {
     const response = await chrome.runtime.sendMessage({ type: "save-page" });
     status.textContent = response?.ok
-      ? "Saved — Career Chief opened in a new tab."
+      ? (response.reused ? "Saved — sent to your open Career Chief tab." : "Saved — Career Chief opened in a new tab.")
       : `Couldn't save: ${response?.error || "unknown error"}`;
   } catch {
     status.textContent = "Couldn't save — is the extension still running?";

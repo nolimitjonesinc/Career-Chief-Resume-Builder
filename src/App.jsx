@@ -87,7 +87,7 @@ export function App() {
   const [conciergeMessages, setConciergeMessages] = useState([]);
   const [conciergeInput, setConciergeInput] = useState("");
   const [conciergeSending, setConciergeSending] = useState(false);
-  const [conciergeCollapsed, setConciergeCollapsed] = useState(false);
+  const [conciergeCollapsed, setConciergeCollapsed] = useState(true);
   const [chatProposal, setChatProposal] = useState(null);
   const [tailored, setTailored] = useState(initialDraft?.tailored || false);
   const [justExported, setJustExported] = useState(false);
@@ -189,6 +189,13 @@ export function App() {
     setBusy(`Reading ${file.name}…`);
     try {
       const extracted = await extractFile(file);
+      // An uploaded resume lands in the resume box, where the user can see and
+      // fix it, and replaces any earlier one. It is never a second hidden source.
+      if (kind === "resume") {
+        setResumeText(extracted.text);
+        setNotice(`${file.name} was read. Your resume is in the box below — check it looks right.`);
+        return;
+      }
       const source = { id: uid(), kind, format: fileFormat(file), name: extracted.name, origin: fileOrigin(file, extracted), text: extracted.text, status: "ready" };
       addSource(source);
       setNotice(`${file.name} was read and added to the analysis.`);
@@ -424,29 +431,52 @@ export function App() {
   // stripped so a refresh never re-imports. A #import= fragment that
   // fails to decode must never fail silently (the user clicked Save and
   // got nothing): it speaks through the dock, never the notice bar.
-  const importHandled = useRef(false);
-  useEffect(() => {
-    if (importHandled.current) return;
-    importHandled.current = true;
+  //
+  // The extension reuses an already-open Career Chief tab by pointing it at
+  // a new #import= fragment, so the page listens for hash changes too, not
+  // only for the first load. A new save REPLACES the previous save when the
+  // user has not edited what that save filled in (typed work is never
+  // overwritten); otherwise it fills empty fields only, as before.
+  const lastImport = useRef(null);
+  const importNow = () => {
+    if (!window.location.hash.startsWith("#import=")) return;
     const payload = decodeImportFragment(window.location.hash);
+    window.history.replaceState(null, "", stripImportFragment(window.location.href));
     if (!payload) {
-      if (window.location.hash.startsWith("#import=")) {
-        window.history.replaceState(null, "", stripImportFragment(window.location.href));
-        say("That saved page couldn't be read. Try saving it again from the job page, or paste the job text instead.");
-      }
+      say("That saved page couldn't be read. Try saving it again from the job page, or paste the job text instead.");
       return;
     }
-    window.history.replaceState(null, "", stripImportFragment(window.location.href));
+    const last = lastImport.current;
+    const replace = Boolean(last) && !analysis && meta.role === last.role && meta.company === last.company && jobText === last.jobText;
+    const keptSources = replace ? sources.filter((item) => item.id !== last.sourceId) : sources;
     // The decision (fills, source, dock message) lives in
     // summarizeExtensionImport so the whole flow is unit-testable. This
-    // effect only applies it: fills, then source, then the message.
-    const result = summarizeExtensionImport(payload, { meta, jobText, sources });
-    if (!result.skipped && result.applied.filled.length) {
+    // only applies it: fills, then source, then the message.
+    const result = summarizeExtensionImport(payload, replace ? { meta: { company: "", role: "" }, jobText: "", sources: keptSources } : { meta, jobText, sources });
+    if (result.skipped) { say(result.message); return; }
+    if (replace || result.applied.filled.length) {
       setMeta(result.applied.meta);
       setJobText(result.applied.jobText);
     }
-    if (result.source) addSource({ id: uid(), ...result.source });
+    let sourceId = last?.sourceId;
+    if (result.source) {
+      const added = { id: uid(), ...result.source };
+      sourceId = added.id;
+      if (replace) setSources([...keptSources, added]);
+      else addSource(added);
+    } else if (replace) {
+      setSources(keptSources);
+    }
+    lastImport.current = { role: result.applied.meta.role, company: result.applied.meta.company, jobText: result.applied.jobText, sourceId };
     say(result.message);
+  };
+  const importRef = useRef(importNow);
+  importRef.current = importNow;
+  useEffect(() => {
+    const run = () => importRef.current();
+    run();
+    window.addEventListener("hashchange", run);
+    return () => window.removeEventListener("hashchange", run);
   }, []);
 
   // The guided focus ring: exactly one element wears .concierge-focus at a
@@ -1026,7 +1056,7 @@ function StartNew({ keepable, evidenceCount, newJob, finish, wipe }) {
 
 function Intake({ meta, setMeta, resumeText, setResumeText, jobText, setJobText, jobUrl, setJobUrl, sources, loadSample, addFile, readJobLink, removeSource, openSource, begin, canBegin, busy, aiEnabled, aiProvider, aiConsent, setAiConsent, clear, startResume }) {
   return <main className="intake-page">
-    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><details className="sample-drop"><summary>Not sure yet? See an example first</summary><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button><Showcase /></details><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
+    <section className="intake-intro"><span className="eyebrow">A little less overwhelm. A clearer next chapter.</span><h1 data-tour="goal">A resume built for each job you want.</h1><p>Upload your resume, the job posting, and any decks or documents. Career Chief studies the role and the company, asks you a few sharp questions, and rewrites your resume to fit. You approve every line.</p><ol className="intake-steps"><li data-tour-step="1"><b>1</b>Bring what you have</li><li data-tour-step="2"><b>2</b>Answer a few questions</li><li data-tour-step="3"><b>3</b>Download your resume</li></ol><details className="sample-drop"><summary>Not sure yet? See an example first</summary><button className="text-action sample-link" data-tour="sample" onClick={loadSample}>See it in action with a sample resume <ArrowRight size={18} /></button></details><div className="promise"><ShieldCheck size={25} /><p><strong>No need to organize anything first.</strong><br/>PowerPoint, PDF, Word, HTML, pasted notes, application questions, or a public link.</p></div></section>
     <form className="source-builder" onSubmit={begin}>
       <div className="builder-head"><div><span className="step-number">1</span><h2>Start with what you have.</h2></div><span className="source-count">{sources.length + (resumeText.trim() ? 1 : 0) + (jobText.trim() ? 1 : 0)} sources ready</span></div>
       <SourceBlock icon={<FileText size={22} />} title="Your resume" tour="resume" required note="PDF, Word, HTML, TXT or pasted text">
