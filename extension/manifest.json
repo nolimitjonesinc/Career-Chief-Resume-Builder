@@ -1,1 +1,30 @@
-{"action":{"default_popup":"popup.html","default_title":"Save to Career Chief"},"background":{"service_worker":"background.js"},"description":"Save the job page you are viewing to Career Chief. Acts only when you click it; sends nothing anywhere except Career Chief.","manifest_version":3,"name":"Save to Career Chief","permissions":["activeTab","scripting","storage"],"version":"0.1.0"}
+{
+  "action": {
+    "default_icon": {
+      "128": "icons/icon128.png",
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    },
+    "default_popup": "popup.html",
+    "default_title": "Save to Career Chief"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "description": "Save the job page you are viewing to Career Chief. Acts only when you click it; sends nothing anywhere except Career Chief.",
+  "icons": {
+    "128": "icons/icon128.png",
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png"
+  },
+  "manifest_version": 3,
+  "name": "Save to Career Chief",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "version": "0.1.0"
+}
