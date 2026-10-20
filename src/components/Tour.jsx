@@ -163,6 +163,8 @@ export function Tour({ autoplay, onSample }) {
     const step = finale ? { key: "sample", text: FINALE } : STEPS[phase];
     const el = target(step.key);
     if (!el) { if (!finale) setPhase("done"); return undefined; }
+    // The example lives in a collapsed dropdown; open it so the tour can point at it.
+    el.closest("details")?.setAttribute("open", "");
     unfocus();
     setArrow(null);
     // A tall target (the example card) is scrolled so its top sits low enough for
