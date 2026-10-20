@@ -39,7 +39,8 @@ button.addEventListener("click", async () => {
   // Declining only means a new tab opens each time.
   try {
     const site = new URL(normalized);
-    await chrome.permissions.request({ origins: [`${site.protocol}//${site.hostname}/*`] });
+    const bare = site.hostname.replace(/^www\./, "");
+    await chrome.permissions.request({ origins: [`${site.protocol}//${bare}/*`, `${site.protocol}//www.${bare}/*`] });
   } catch {
     // Not granted: saving still works, it just opens a new tab.
   }

@@ -39,7 +39,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // site permission the lookup finds nothing and we open a new tab.
       let reused = false;
       try {
-        const open = await chrome.tabs.query({ url: `${url.protocol}//${url.hostname}/*` });
+        // The site redirects careerchief.ai to www.careerchief.ai, so look for both.
+        const bare = url.hostname.replace(/^www\./, "");
+        const open = (await Promise.all([bare, `www.${bare}`].map((host) => chrome.tabs.query({ url: `${url.protocol}//${host}/*` })))).flat();
         const existing = open.find((candidate) => candidate.id !== tab.id);
         if (existing) {
           await chrome.tabs.update(existing.id, { url: url.href, active: true });
