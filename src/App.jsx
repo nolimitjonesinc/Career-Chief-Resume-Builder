@@ -519,7 +519,7 @@ export function App() {
       setScreen("workspace");
       setTab("interview");
       const q = nextQuestion(questions, questionStatus);
-      if (q) { const m = questionMessage(q); say(m.text, m.actions); }
+      if (q) { setQuestionIndex(questions.indexOf(q)); const m = questionMessage(q); say(m.text, m.actions); }
       return;
     }
     if (action === "open-case") { setScreen("workspace"); setTab("case"); return; }
@@ -767,12 +767,15 @@ export function App() {
     setQuestionStatus((state) => ({ ...state, [question.id]: "answered" }));
     if (pendingFollowUp || (question.id === "ownership" && !questions.some((item) => item.id === "ownership-detail"))) {
       const followUp = pendingFollowUp || { id: "ownership-detail", priority: "From your answer", topic: "Personal contribution", prompt: "Who else was involved, and which decisions or deliverables were specifically yours?", why: "Your answer shows a program. This follow-up separates collaboration from personal ownership.", tip: "Credit the team while being precise about what you drove." };
-      setQuestions((items) => [...items.slice(0, questionIndex + 1), followUp, ...items.slice(questionIndex + 1)]);
+      setQuestions((items) => [...items.slice(0, questionIndex + 1), { ...followUp, priority: "Quick follow-up on your last answer" }, ...items.slice(questionIndex + 1)]);
     }
     setPendingFollowUp(null);
     setAnswer("");
     setModal(null);
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
+    // Always land on the next question, wherever the user was.
+    setScreen("workspace");
+    setTab("interview");
     // One confirmation, in the dock — the old notice bar said the same thing.
     say("Approved — your answer is now evidence on your resume.");
     const remaining = questions.filter((item) => item.id !== question.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
@@ -787,6 +790,8 @@ export function App() {
     if (!currentQuestion) return;
     setQuestionStatus((state) => ({ ...state, [currentQuestion.id]: "skipped" }));
     setQuestionIndex((value) => Math.min(value + 1, questions.length));
+    setScreen("workspace");
+    setTab("interview");
     setAnswer("");
     const remaining = questions.filter((item) => item.id !== currentQuestion.id && questionStatus[item.id] !== "answered" && questionStatus[item.id] !== "skipped");
     const next = remaining[0] || null;
@@ -972,9 +977,10 @@ export function App() {
       </div>
       <div className="workspace">
         <main className="main-pane">
+          {tab !== "interview" && <NextStepBar next={nextQuestion(questions, questionStatus)} questions={questions} go={() => handleConciergeAction("back-to-question")} finish={() => handleConciergeAction("finish")} />}
           {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => { setTab("interview"); const q = nextQuestion(questions, questionStatus); if (q) { const m = questionMessage(q); say(m.text, m.actions); } }} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
-          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} />}
+          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} finish={() => handleConciergeAction("finish")} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
           {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
@@ -1132,10 +1138,18 @@ function Research({ analysis, sources, inspect, add }) {
   return <><span className="eyebrow">Research with receipts</span><h1>What the sources say.<br/>What it changes.</h1><p className="lead">Resume evidence, role requirements, company direction, leadership context, and uncertainty stay visibly separate.</p><div className="research-stats"><div><strong>{sources.length}</strong><span>supplied sources</span></div><div><strong>{analysis.requirements.length}</strong><span>role priorities</span></div><div><strong>{analysis.gaps.length}</strong><span>open questions</span></div></div><section className="source-library"><div className="section-title"><div><h3>Source library</h3><p>Open any item to see the extracted text.</p></div><button className="text-action" onClick={add}><Plus size={17} /> Add source</button></div>{sources.map((source) => <button className="source-button" key={source.id} onClick={() => inspect(source)}><span className="source-type">{sourceLabels[source.kind]}</span><strong>{source.name}</strong><small>{source.origin}</small><ArrowSquareOut size={16} /></button>)}</section><div className="research-list">{analysis.research.map((item) => <article key={item.id}><span className="eyebrow">{item.label} · {item.origin}</span><h3>{item.title}</h3><p>{item.finding}</p><div className="implication"><strong>What this changes</strong><p>{item.implication}</p></div>{item.url ? <a className="text-action" href={item.url} target="_blank" rel="noreferrer">Read public source <ArrowSquareOut size={16} /></a> : <button className="text-action" onClick={() => inspect(sources.find((source) => source.id === item.id))}>View extracted evidence <ArrowSquareOut size={16} /></button>}</article>)}</div></>;
 }
 
-function Interview({ questions, index, status }) {
+// Shown on every workspace page except the interview, so the next step is
+// always one click away: back to the next question, or finish when none are left.
+function NextStepBar({ next, questions, go, finish }) {
+  return <div className="next-step-bar">{next
+    ? <><div><strong>Next: question {questions.indexOf(next) + 1} of {questions.length}</strong><span>{next.topic}</span></div><button className="primary" onClick={go}>Continue to the next question <ArrowRight size={17} /></button></>
+    : <><div><strong>All questions done</strong><span>Your resume is ready to finish.</span></div><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>}</div>;
+}
+
+function Interview({ questions, index, status, finish }) {
   const q = questions[index];
   const answered = Object.values(status).filter((value) => value === "answered").length;
-  if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p></>;
+  if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>;
   // The question is shown here as well as in the concierge dock: the dock
   // starts collapsed, which hid it. The answer box and the Skip /
   // I-don't-know buttons stay in the dock.
