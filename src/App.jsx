@@ -1136,11 +1136,11 @@ function Interview({ questions, index, status }) {
   const q = questions[index];
   const answered = Object.values(status).filter((value) => value === "answered").length;
   if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p></>;
-  // The question itself lives ONLY in the concierge dock below — its prompt,
-  // its Skip / I-don't-know buttons, and the answer box are all there. This
-  // pane shows work context only: progress + why this question matters.
+  // The question is shown here as well as in the concierge dock: the dock
+  // starts collapsed, which hid it. The answer box and the Skip /
+  // I-don't-know buttons stay in the dock.
   // (Finish lives in the header + the dock's persistent button, not here.)
-  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><details><summary>Why this can change your case</summary><p>{q.why}</p></details><p className="quiet">The question is in the Career Chief box below — answer there, in your own words.</p></section></>;
+  return <><div className="interview-head"><div><span className="status"><CheckCircle size={17} /> Working resume ready · finish anytime</span><h1>One useful question<br/>at a time.</h1></div><div className="progress-copy"><strong>{answered} of {questions.length}</strong><span>answered</span></div></div><section className="question-card"><div className="question-meta"><span className="eyebrow">{q.priority}</span><span>Question {index + 1} of {questions.length}</span></div><h2>{q.prompt}</h2><details><summary>Why this can change your case</summary><p>{q.why}</p></details><p className="quiet">Type your answer in the box at the bottom of the screen, in your own words.</p></section></>;
 }
 
 function CareerEvidence({ sources, answers, inspect, add, clear }) {
