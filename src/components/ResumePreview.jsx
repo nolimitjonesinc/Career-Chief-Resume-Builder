@@ -9,7 +9,12 @@ const PAGE_WIDTH_PX = 816;
 // export, styled to the PDF's metrics. Click any line to edit it in place —
 // Enter or clicking away saves, Escape cancels. Saving goes through onEdit
 // (the parent marks it a manual edit and persists the draft).
-export function ResumePreview({ doc, onEdit }) {
+// changedLines: resume lines added or reworded from the user's approved
+// answers, oldest first. They are marked on screen only (exports never see
+// it), and the newest is scrolled into view, so a change is never hunted for.
+const norm = (text) => String(text || "").replace(/\s+/g, " ").trim();
+
+export function ResumePreview({ doc, onEdit, changedLines = [] }) {
   const [editing, setEditing] = useState(null);
   const editingRef = useRef(null);
   const draftRef = useRef("");
@@ -80,6 +85,27 @@ export function ResumePreview({ doc, onEdit }) {
     setEditing(descriptor);
   };
 
+  const changedKey = changedLines.map(norm).filter(Boolean).join("\n");
+  // Starts at the newest line on load, so only a change made now scrolls.
+  const lastScrolled = useRef(null);
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const wanted = changedKey ? changedKey.split("\n") : [];
+    let newest = null;
+    page.querySelectorAll("[data-edit]").forEach((el) => {
+      const at = wanted.indexOf(norm(el.textContent));
+      el.classList.toggle("line-changed", at >= 0);
+      if (at >= 0 && at === wanted.length - 1) newest = el;
+    });
+    const newestLine = wanted[wanted.length - 1] || "";
+    if (lastScrolled.current === null) { lastScrolled.current = newestLine; return; }
+    if (newest && newestLine !== lastScrolled.current) {
+      lastScrolled.current = newestLine;
+      newest.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  });
+
   const handleInput = (event) => {
     if (event.target.matches("[data-edit-input]")) draftRef.current = event.target.value;
   };
@@ -113,6 +139,6 @@ export function ResumePreview({ doc, onEdit }) {
         dangerouslySetInnerHTML={{ __html: resumeBodyHtml(view, { editMode: true, editing, highlightCount }) }}
       />
     </div>
-    <p className="resume-preview-hint">Click any line to edit it in place.</p>
+    <p className="resume-preview-hint">{changedKey ? <><span className="line-changed-key">Green</span> lines were added or changed from your answers. </> : null}Click any line to edit it in place.</p>
   </div>;
 }

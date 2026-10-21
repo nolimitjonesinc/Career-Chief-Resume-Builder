@@ -986,7 +986,7 @@ export function App() {
         </main>
         <aside className="resume-pane">
           <div className="resume-top"><div><span>Working resume</span><small>Available from the start</small></div><button className="text-action" onClick={() => setModal("editor")}><ArrowSquareOut size={17} /> Open & edit</button></div>
-          <ResumePreview doc={doc} onEdit={saveInlineEdit} />
+          <ResumePreview doc={doc} onEdit={saveInlineEdit} changedLines={answers.map((item) => item.resumeLine)} />
           {ledger && <div className="resume-ledger"><LedgerButton ledger={ledger} open={() => setModal("ledger")} /></div>}
           <div className="resume-foot"><span>{manualEdit ? "Your manual wording is protected." : "All proposed changes require approval."}</span><button className="text-action" disabled={!history.length} onClick={undoResume}><ArrowCounterClockwise size={16} /> Undo</button></div>
         </aside>
