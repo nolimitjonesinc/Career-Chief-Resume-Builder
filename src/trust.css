@@ -124,3 +124,4 @@ body[data-tour-stage="1"] [data-tour-step="1"] b,body[data-tour-stage="2"] [data
 .gate-card p{margin:0 0 6px}
 .gate-card button{margin-top:14px}
 .gate-error{color:#9a3412;font-size:13px;font-weight:600}
+dialog .tailor-pick{display:flex;flex-direction:row;justify-content:flex-start;align-items:center;gap:10px;margin:0 0 10px}dialog .tailor-pick input{width:18px;height:18px;flex:none;margin:0}

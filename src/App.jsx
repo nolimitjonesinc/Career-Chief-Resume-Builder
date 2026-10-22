@@ -90,6 +90,10 @@ export function App() {
   const [conciergeCollapsed, setConciergeCollapsed] = useState(true);
   const [chatProposal, setChatProposal] = useState(null);
   const [tailored, setTailored] = useState(initialDraft?.tailored || false);
+  // Lines the approved tailoring reworded, highlighted in the preview like answer lines.
+  const [tailorLines, setTailorLines] = useState(initialDraft?.tailorLines || []);
+  // Set when the last question is done; tailoring opens once the resume state has settled.
+  const [autoTailor, setAutoTailor] = useState(false);
   const [justExported, setJustExported] = useState(false);
   const [modal, setModal] = useState(null);
   const [sourceDraft, setSourceDraft] = useState({ ...blankSource });
@@ -138,9 +142,9 @@ export function App() {
   }, []);
   useEffect(() => {
     if (savedByNewer) return;
-    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, tailored, draftVersion: DRAFT_VERSION })); }
+    try { localStorage.setItem(storageKey, JSON.stringify({ screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareJobs: compareList, tailored, tailorLines, draftVersion: DRAFT_VERSION })); }
     catch { /* Browser storage may be unavailable or full; the current session still works. */ }
-  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareList, tailored]);
+  }, [screen, tab, meta, resumeText, jobText, jobUrl, sources, analysis, doc, history, questions, questionIndex, questionStatus, answers, manualEdit, projectName, savedProjects, careerBank, compareList, tailored, tailorLines]);
 
   const currentQuestion = questions[questionIndex];
   const completed = Object.values(questionStatus).filter((value) => value === "answered").length;
@@ -720,6 +724,15 @@ export function App() {
     }
   }
 
+  // Tailoring runs on its own once the last question is answered or skipped,
+  // after the final answer has landed in the resume. It still opens as a
+  // before/after review: nothing changes until the user approves.
+  useEffect(() => {
+    if (!autoTailor || modal || !doc) return;
+    setAutoTailor(false);
+    startTailor();
+  }, [autoTailor, modal, doc]);
+
   function useSimpleTailor() {
     const jobBlob = [jobText, ...sources.filter((item) => item.kind === "job" || item.kind === "application").map((item) => item.text)].filter(Boolean).join("\n");
     setTailorState({ status: "ready", mode: "rules", result: tailorByRules(doc, jobBlob) });
@@ -729,10 +742,20 @@ export function App() {
     const result = tailorState.result;
     setHistory((items) => [...items, { ...doc }]);
     setDoc((value) => ({ ...value, ...(picks.summary && result.summary ? { summary: result.summary } : {}), ...(picks.experience ? { roles: result.roles } : {}), ...(picks.skills ? { skills: result.skills } : {}) }));
+    const before = new Set([doc.summary, ...(doc.roles || []).flatMap((role) => role.bullets || [])].filter(Boolean));
+    const reworded = [
+      ...(picks.summary && result.summary && result.summary !== doc.summary ? [result.summary] : []),
+      ...(picks.experience ? (result.roles || []).flatMap((role) => role.bullets || []).filter((line) => line && !before.has(line)) : []),
+    ];
+    setTailorLines(reworded);
     setTailored(true);
     setModal(null);
+    setScreen("workspace");
+    setTab("interview");
     // One confirmation, in the dock — the old notice bar said the same thing.
-    say("Tailoring applied — your resume now leads with what this job asks for.");
+    say(reworded.length
+      ? `Tailoring applied — ${reworded.length} line${reworded.length === 1 ? "" : "s"} reworded (highlighted green) and the most relevant work moved to the top. Ready to finish whenever you are.`
+      : "Tailoring applied — the most relevant work now comes first. Ready to finish whenever you are.");
   }
 
   function applyProposal() {
@@ -783,6 +806,7 @@ export function App() {
     if (next) { const m = questionMessage(next); say(m.text, m.actions); }
     // No Finish button on this message: Finish lives in the header + the
     // dock's persistent button. A third copy here was pure repetition.
+    else if (!tailored) { say("That's every question. Now I'll tailor your resume to the job — review the changes and approve what you want."); setAutoTailor(true); }
     else say("That's every question — your resume is ready whenever you are.");
   }
 
@@ -798,6 +822,7 @@ export function App() {
     if (next) { const m = questionMessage(next); say(m.text, m.actions); }
     // No Finish button on this message: Finish lives in the header + the
     // dock's persistent button.
+    else if (!tailored) { say("Skipped. That's every question — now I'll tailor your resume to the job. Review the changes and approve what you want."); setAutoTailor(true); }
     else say("Skipped — it stays out of your resume, and nothing is blocked.");
   }
 
@@ -914,7 +939,7 @@ export function App() {
     setMeta(target.meta); setDoc(target.doc); setAnalysis(target.analysis); setQuestions(target.questions);
     setAnswers(target.answers); setQuestionStatus(target.questionStatus); setQuestionIndex(target.questionIndex);
     setSources(target.sources); setResumeText(target.resumeText || ""); setJobText(target.jobText || ""); setManualEdit(target.manualEdit || false);
-    setHistory([]); setTab("case"); setModal(null);
+    setHistory([]); setTailored(false); setTailorLines([]); setTab("case"); setModal(null);
     setConciergeMessages([]); setChatProposal(null); setConciergeInput("");
     setNotice("Opportunity opened. Its questions and resume are separate; confirmed career answers remain in your evidence bank.");
     say(`Back to ${target.meta.company || "this opportunity"} — ${target.meta.role}. Your confirmed career answers came along.`);
@@ -935,7 +960,7 @@ export function App() {
     setSavedProjects((saved) => ({ ...saved, [projectName]: snapshot() }));
     setProjectName(key); setMeta(nextMeta); setSources(nextSources); setResumeText(""); setJobText("");
     setAnalysis(next); setDoc(next.doc); setQuestions(next.questions); setAnswers([]); setQuestionStatus({}); setQuestionIndex(0);
-    setHistory([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
+    setHistory([]); setTailored(false); setTailorLines([]); setManualEdit(false); setTab("case"); setScreen("workspace"); setModal(null);
     setConciergeMessages([]); setChatProposal(null); setConciergeInput("");
     setNewOpportunity({ company: "", role: "", job: "" });
     setNotice("New opportunity created from your career evidence. Its hiring case and resume are ready to refine.");
@@ -977,16 +1002,16 @@ export function App() {
       </div>
       <div className="workspace">
         <main className="main-pane">
-          {tab !== "interview" && <NextStepBar next={nextQuestion(questions, questionStatus)} questions={questions} go={() => handleConciergeAction("back-to-question")} finish={() => handleConciergeAction("finish")} />}
+          {tab !== "interview" && <NextStepBar next={nextQuestion(questions, questionStatus)} questions={questions} tailored={tailored} tailor={startTailor} go={() => handleConciergeAction("back-to-question")} finish={() => handleConciergeAction("finish")} />}
           {tab === "case" && <HiringCase analysis={analysis} coverage={coverage} questions={questions} sources={intakeSources} start={() => { setTab("interview"); const q = nextQuestion(questions, questionStatus); if (q) { const m = questionMessage(q); say(m.text, m.actions); } }} researching={researching} research={() => setTab("research")} />}
           {tab === "research" && <Research analysis={analysis} sources={intakeSources} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} />}
-          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} finish={() => handleConciergeAction("finish")} />}
+          {tab === "interview" && <Interview questions={questions} index={questionIndex} status={questionStatus} tailored={tailored} tailor={startTailor} finish={() => handleConciergeAction("finish")} />}
           {tab === "compare" && <CompareJobs jobs={compareList} setJobs={setCompareList} result={comparison} currentJob={currentJob} />}
           {tab === "career" && <CareerEvidence sources={intakeSources} answers={careerBank} inspect={(source) => { setSelectedSource(source); setModal("source-view"); }} add={() => { setSourceDraft({ ...blankSource }); setModal("source-add"); }} clear={() => setModal("clear")} />}
         </main>
         <aside className="resume-pane">
           <div className="resume-top"><div><span>Working resume</span><small>Available from the start</small></div><button className="text-action" onClick={() => setModal("editor")}><ArrowSquareOut size={17} /> Open & edit</button></div>
-          <ResumePreview doc={doc} onEdit={saveInlineEdit} changedLines={answers.map((item) => item.resumeLine)} />
+          <ResumePreview doc={doc} onEdit={saveInlineEdit} changedLines={[...answers.map((item) => item.resumeLine), ...tailorLines]} />
           {ledger && <div className="resume-ledger"><LedgerButton ledger={ledger} open={() => setModal("ledger")} /></div>}
           <div className="resume-foot"><span>{manualEdit ? "Your manual wording is protected." : "All proposed changes require approval."}</span><button className="text-action" disabled={!history.length} onClick={undoResume}><ArrowCounterClockwise size={16} /> Undo</button></div>
         </aside>
@@ -1140,16 +1165,20 @@ function Research({ analysis, sources, inspect, add }) {
 
 // Shown on every workspace page except the interview, so the next step is
 // always one click away: back to the next question, or finish when none are left.
-function NextStepBar({ next, questions, go, finish }) {
+function NextStepBar({ next, questions, tailored, tailor, go, finish }) {
   return <div className="next-step-bar">{next
     ? <><div><strong>Next: question {questions.indexOf(next) + 1} of {questions.length}</strong><span>{next.topic}</span></div><button className="primary" onClick={go}>Continue to the next question <ArrowRight size={17} /></button></>
-    : <><div><strong>All questions done</strong><span>Your resume is ready to finish.</span></div><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>}</div>;
+    : !tailored
+      ? <><div><strong>All questions done</strong><span>Next: tailor your resume to this job. You approve every change.</span></div><button className="primary" onClick={tailor}>Tailor my resume to the job <ArrowRight size={17} /></button></>
+      : <><div><strong>Tailored and ready</strong><span>Your resume is ready to finish.</span></div><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>}</div>;
 }
 
-function Interview({ questions, index, status, finish }) {
+function Interview({ questions, index, status, tailored, tailor, finish }) {
   const q = questions[index];
   const answered = Object.values(status).filter((value) => value === "answered").length;
-  if (!q) return <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>You’ve answered the<br/>highest-value questions.</h1><p className="lead">The resume is still yours to edit. Anything unresolved stays out of the claims.</p><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>;
+  if (!q) return tailored
+    ? <><span className="status"><CheckCircle size={17} /> Tailored to the job</span><h1>Your resume is<br/>ready to finish.</h1><p className="lead">Green lines in the preview are what changed. It's still yours to edit — click any line.</p><button className="primary" onClick={finish}>Finish my resume <ArrowRight size={17} /></button></>
+    : <><span className="status"><CheckCircle size={17} /> Interview plan complete</span><h1>Now let's tailor it<br/>to this job.</h1><p className="lead">I'll reorder and reword your resume toward what this job asks for, using only your own facts. You approve every change.</p><button className="primary" onClick={tailor}>Tailor my resume to the job <ArrowRight size={17} /></button></>;
   // The question is shown here as well as in the concierge dock: the dock
   // starts collapsed, which hid it. The answer box and the Skip /
   // I-don't-know buttons stay in the dock.
